@@ -32,6 +32,16 @@ const els = {
   log: $('#log'),
   consumeBtn: $('#consume-btn'),
   consumeResult: $('#consume-result'),
+  setupBannerText: $('#setup-banner-text'),
+  credBtn: $('#cred-btn'),
+  credModal: $('#cred-modal'),
+  credAppId: $('#cred-appid'),
+  credSecret: $('#cred-secret'),
+  credGateway: $('#cred-gateway'),
+  credSave: $('#cred-save'),
+  credClear: $('#cred-clear'),
+  credCancel: $('#cred-cancel'),
+  credErr: $('#cred-err'),
 };
 
 let sdk = null;
@@ -67,6 +77,103 @@ themeBtn.addEventListener('click', () => {
 });
 /* 与 <head> 中预置的主题同步图标（不重复写入 localStorage） */
 applyTheme(document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light', false);
+
+/* ---------------- 配置解析与凭证弹窗（静态部署） ---------------- */
+const DEFAULT_GATEWAY = 'https://nebula-agent.xingyun3d.com/user/v1/ttsa/session';
+
+/* 配置来源优先级：服务端（npm start / Docker）→ 构建注入（GitHub Pages Variables）
+ * → 访问者浏览器内填写的凭证（localStorage） */
+async function resolveConfig() {
+  /* 1) 服务端模式：/api/config 存在且返回合法 JSON */
+  try {
+    const res = await fetch('/api/config', { headers: { Accept: 'application/json' } });
+    if (res.ok) {
+      const cfg = await res.json();
+      if (cfg && typeof cfg.configured === 'boolean') {
+        return { mode: 'server', cfg };
+      }
+    }
+  } catch (e) { /* 静态部署没有该接口，走下方分支 */ }
+
+  /* 2) 构建时注入（Pages 工作流从仓库 Variables 生成 config.js） */
+  const w = window.XMOV_CONFIG || {};
+  if (w.appId && w.appSecret) {
+    return {
+      mode: 'static',
+      cfg: {
+        configured: true,
+        appId: w.appId,
+        appSecret: w.appSecret,
+        gatewayServer: w.gatewayServer || DEFAULT_GATEWAY,
+        authorization: w.authorization || '',
+      },
+    };
+  }
+
+  /* 3) 访问者自己填写的凭证（仅存当前浏览器） */
+  try {
+    const saved = JSON.parse(localStorage.getItem('xmoy-cred') || 'null');
+    if (saved && saved.appId && saved.appSecret) {
+      return {
+        mode: 'static',
+        cfg: {
+          configured: true,
+          appId: saved.appId,
+          appSecret: saved.appSecret,
+          gatewayServer: saved.gatewayServer || DEFAULT_GATEWAY,
+          authorization: '',
+        },
+      };
+    }
+  } catch (e) { /* ignore */ }
+
+  return {
+    mode: 'static',
+    cfg: { configured: false, appId: '', appSecret: '', gatewayServer: DEFAULT_GATEWAY, authorization: '' },
+  };
+}
+
+function readSavedCred() {
+  try { return JSON.parse(localStorage.getItem('xmoy-cred') || 'null'); } catch (e) { return null; }
+}
+
+function openCredModal() {
+  const saved = readSavedCred();
+  const w = window.XMOV_CONFIG || {};
+  els.credAppId.value = (saved && saved.appId) || w.appId || '';
+  els.credSecret.value = (saved && saved.appSecret) || w.appSecret || '';
+  els.credGateway.value = (saved && saved.gatewayServer) || w.gatewayServer || DEFAULT_GATEWAY;
+  els.credErr.textContent = '';
+  els.credModal.classList.remove('hidden');
+  els.credAppId.focus();
+}
+
+function closeCredModal() {
+  els.credModal.classList.add('hidden');
+}
+
+els.credSave.addEventListener('click', () => {
+  const appId = els.credAppId.value.trim();
+  const appSecret = els.credSecret.value.trim();
+  if (!appId || !appSecret) {
+    els.credErr.textContent = '请填写 App ID 与 App Secret';
+    return;
+  }
+  localStorage.setItem('xmoy-cred', JSON.stringify({
+    appId,
+    appSecret,
+    gatewayServer: els.credGateway.value.trim() || DEFAULT_GATEWAY,
+  }));
+  location.reload();
+});
+
+els.credClear.addEventListener('click', () => {
+  localStorage.removeItem('xmoy-cred');
+  location.reload();
+});
+
+els.credCancel.addEventListener('click', closeCredModal);
+els.credBtn.addEventListener('click', openCredModal);
 
 /* ---------------- 工具 ---------------- */
 const pad = (n) => String(n).padStart(2, '0');
@@ -333,20 +440,30 @@ function demoNext() {
 
 /* ---------------- 主流程 ---------------- */
 async function main() {
-  let cfg;
-  try {
-    const res = await fetch('/api/config');
-    cfg = await res.json();
-  } catch (e) {
-    els.banner.classList.remove('hidden');
-    log(`无法获取配置：${e.message}`, 'error');
+  const { mode, cfg } = await resolveConfig();
+
+  if (!cfg.configured) {
+    if (mode === 'server') {
+      els.banner.classList.remove('hidden');
+      log('未检测到应用凭证：请编辑 .env 后重启服务', 'error');
+    } else {
+      els.credBtn.classList.remove('hidden');
+      els.banner.classList.remove('hidden');
+      els.banner.querySelector('strong').textContent = '未配置驱动应用凭证';
+      els.setupBannerText.innerHTML =
+        '静态部署页面：点击右上角 <strong>凭证</strong> 按钮，填写你的驱动应用 App ID / App Secret（仅保存在当前浏览器）。';
+      openCredModal();
+      log('静态部署未配置凭证：请填写驱动应用凭证后开始', 'warn');
+    }
     return;
   }
 
-  if (!cfg.configured) {
-    els.banner.classList.remove('hidden');
-    log('未检测到应用凭证：请编辑 .env 后重启服务', 'error');
-    return;
+  if (mode === 'static') {
+    els.credBtn.classList.remove('hidden');
+    /* 静态版无服务端，积分查询依赖服务端代理，直接禁用 */
+    els.consumeBtn.disabled = true;
+    els.consumeBtn.title = '静态部署无服务端代理，积分查询不可用';
+    log(`静态部署模式：已读取凭证（${readSavedCred() ? '当前浏览器填写' : '构建时注入'}）`);
   }
 
   if (typeof window.XmovAvatar !== 'function') {

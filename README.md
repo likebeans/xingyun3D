@@ -66,6 +66,25 @@ docker run -d -p 3000:3000 \
 3. 填入 `XMOV_APP_ID` / `XMOV_APP_SECRET`，运行 `npm start`；
 4. 点击自动转发的 3000 端口即可开始玩。
 
+### 方式四：GitHub Pages 在线体验（无需本机）
+
+仓库内置 Pages 部署工作流，构建成功后即可通过网址直接访问：
+
+**https://likebeans.github.io/xingyun3D/**
+
+凭证注入两种模式（二选一）：
+
+- **让访问者打开即玩**：在仓库 **Settings → Secrets and variables → Actions → Variables** 中添加
+  `XMOV_APP_ID` / `XMOV_APP_SECRET`（可选 `XMOV_GATEWAY_SERVER` / `XMOV_AUTHORIZATION`），
+  然后重新运行「GitHub Pages 部署」工作流即可。
+  ⚠️ 这些值会**公开嵌入页面源码，任何人可见**，且所有访问者都会消耗该账号的积分——
+  请使用专门用于公开演示的低额度账号；
+- **访问者自己填**：不配置变量时，打开页面点击右上角「凭证」按钮，填写**自己的** App ID / Secret
+  （仅保存在该访问者的浏览器 localStorage，不会上传）。
+
+> 首次使用需在仓库 **Settings → Pages** 中将 Source 设为 **GitHub Actions**（一次性操作，之后每次推送自动部署）。
+> 静态版无服务端，积分查询按钮不可用；单会话限制（同一时间只能一人使用）同样适用。
+
 ## ⚙️ 环境变量
 
 | 变量 | 必填 | 说明 |
@@ -90,13 +109,15 @@ xingyun3D/
 ├── .devcontainer/            # GitHub Codespaces 一键环境
 ├── .github/workflows/
 │   ├── ci.yml                # CI：语法检查 + 无凭证/假凭证启动冒烟测试
-│   └── docker-publish.yml    # 推 main / v* 标签时构建并发布 GHCR 镜像
+│   ├── docker-publish.yml    # 推 main / v* 标签时构建并发布 GHCR 镜像
+│   └── pages.yml             # 推 main 时部署 GitHub Pages 在线版（可从仓库 Variables 注入凭证）
 ├── docs/
 │   └── screenshot.png        # 演示截图
 └── public/
-    ├── index.html            # 演示页面：左侧数字人舞台 + 右侧控制台
+    ├── index.html            # 演示页面：左侧数字人舞台 + 右侧控制台 + 凭证配置弹窗
     ├── style.css             # 亮/暗双主题（CSS 变量驱动，含 prefers-reduced-motion 降级）
-    └── main.js               # SDK 接入全流程：创建实例 → init → speak → 状态控制 → destroy
+    ├── config.js             # 静态部署配置（Pages 构建时覆写；服务端模式下为空对象）
+    └── main.js               # SDK 接入全流程 + 三级配置解析（服务端 / 构建注入 / 浏览器填写）
 ```
 
 ## 🔌 接入流程（对照官方文档）
@@ -116,6 +137,7 @@ xingyun3D/
 | --- | --- | --- |
 | `CI` | push / PR | 语法检查；无凭证启动应提示未配置；假凭证启动应正确注入配置；静态资源 200 |
 | `Docker 镜像发布` | push 到 main 或打 `v*` 标签 | 构建镜像并发布到 GHCR，产出 `ghcr.io/likebeans/xingyun3d:latest` |
+| `GitHub Pages 部署` | push 到 main / 手动触发 | 部署静态在线版到 `https://likebeans.github.io/xingyun3D/`，可从仓库 Variables 注入凭证 |
 
 > 首次发布后，仓库 Settings → Packages 中可看到该镜像包；Actions 使用自动生成的
 > `GITHUB_TOKEN`（具备 `packages: write` 权限），无需额外配置 Secret。

@@ -1,0 +1,50 @@
+# GitHub Pages 在线部署：构建成功后访问
+#   https://likebeans.github.io/xingyun3D/
+#
+# 凭证注入方式（二选一）：
+#   1. 在仓库 Settings → Secrets and variables → Actions → Variables 中配置
+#      XMOV_APP_ID / XMOV_APP_SECRET（可选 XMOV_GATEWAY_SERVER / XMOV_AUTHORIZATION），
+#      构建时写入 config.js，访问者打开即玩。⚠️ 这些值会公开嵌入页面源码，
+#      请使用专门用于公开演示的账号（任何人可见，会消耗该账号积分）。
+#   2. 不配置变量：页面提供「凭证」按钮，访问者填写自己的 App ID / Secret
+#      （仅保存在其浏览器 localStorage）。
+name: GitHub Pages 部署
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 组装静态站点（从仓库 Variables 注入凭证，未设置则为空）
+        run: |
+          mkdir -p dist
+          cp -r public/. dist/
+          cat > dist/config.js <<'EOF'
+          window.XMOV_CONFIG = {
+            appId: '${{ vars.XMOV_APP_ID }}',
+            appSecret: '${{ vars.XMOV_APP_SECRET }}',
+            gatewayServer: '${{ vars.XMOV_GATEWAY_SERVER }}',
+            authorization: '${{ vars.XMOV_AUTHORIZATION }}'
+          };
+          EOF
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+      - uses: actions/deploy-pages@v4
