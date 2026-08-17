@@ -1,0 +1,13 @@
+{
+  "name": "xingyun3d-avatar-demo",
+  "version": "1.0.0",
+  "private": true,
+  "description": "魔珐星云具身驱动SDK（JS）演示控制台 —— 零依赖示例",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "engines": {
+    "node": ">=18.17"
+  }
+}

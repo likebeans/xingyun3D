@@ -1,0 +1,12 @@
+# 快速开始：cp .env.example .env 填入凭证后执行
+#   docker compose up -d --build
+# 然后访问 http://localhost:3000
+services:
+  xingyun-demo:
+    image: ghcr.io/likebeans/xingyun3d:latest
+    build: .
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env
+    restart: unless-stopped

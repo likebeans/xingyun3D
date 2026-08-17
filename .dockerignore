@@ -1,0 +1,13 @@
+.git
+.gitignore
+.env
+.env.example
+docs
+.github
+.devcontainer
+docker-compose.yml
+Dockerfile
+*.md
+node_modules
+tmp
+.DS_Store

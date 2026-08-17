@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: 语法检查
+        run: |
+          node --check server.js
+          node --check public/main.js
+
+      - name: 无凭证启动冒烟测试（应提示未配置）
+        run: |
+          PORT=3456 node server.js > /tmp/server1.log 2>&1 &
+          PID=$!
+          for i in $(seq 1 20); do curl -sf http://localhost:3456/api/config && break; sleep 0.5; done
+          curl -sf http://localhost:3456/api/config | grep -q '"configured":false'
+          curl -sf -o /dev/null http://localhost:3456/
+          curl -sf -o /dev/null http://localhost:3456/style.css
+          curl -sf -o /dev/null http://localhost:3456/main.js
+          curl -sf http://localhost:3456/api/consume | grep -q 'error_code'
+          kill $PID
+
+      - name: 假凭证启动冒烟测试（验证配置注入）
+        run: |
+          PORT=3457 XMOV_APP_ID=dummy_app XMOV_APP_SECRET=dummy_secret node server.js > /tmp/server2.log 2>&1 &
+          PID=$!
+          for i in $(seq 1 20); do curl -sf http://localhost:3457/api/config && break; sleep 0.5; done
+          curl -sf http://localhost:3457/api/config | grep -q '"configured":true'
+          curl -sf http://localhost:3457/api/config | grep -q 'dummy_app'
+          kill $PID
