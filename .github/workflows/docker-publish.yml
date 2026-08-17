@@ -29,6 +29,7 @@ jobs:
         with:
           context: .
           push: true
+          # GHCR 镜像名必须全小写，仓库名含大写字母，因此硬编码小写镜像名
           tags: |
-            ghcr.io/${{ github.repository }}:latest
-            ghcr.io/${{ github.repository }}:${{ github.sha }}
+            ghcr.io/likebeans/xingyun3d:latest
+            ghcr.io/likebeans/xingyun3d:${{ github.sha }}
