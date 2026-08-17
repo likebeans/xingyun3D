@@ -9,6 +9,8 @@ category: 实战
 
 前面几篇聊了怎么让数字人「念稿」。但这套 SDK 最值钱的地方，是它能**流式接收文本**——这正好和大模型的流式输出无缝衔接，做出一个**实时响应的 AI 数字人主播**。
 
+![数字人流式播报中，字幕、口型、动作实时同步](images/blog-02-speaking.png)
+
 这篇文章我会讲清楚原理、给出可跑的代码，并指出几个容易翻车的地方。
 
 （项目地址：https://github.com/likebeans/xingyun3D ；在线体验：https://likebeans.github.io/xingyun3D/ ；注册邀请码 **XDZARL7NEP** 送 1000 积分。）
@@ -154,7 +156,83 @@ onVoiceStateChange(status) {
 
 ---
 
-## 六、它到底能做到什么程度
+## 六、完整的多轮对话状态机
+
+上面的代码是「单轮问答」。要做出真正的 AI 主播/客服，你需要一个**状态机**来管理「听 → 想 → 说 → 回待机」的完整循环。下面是我整理的完整版（伪代码，关键逻辑可直接抄）：
+
+```js
+const ConversationState = {
+  IDLE: 'idle',           // 待机，等用户开口
+  LISTENING: 'listening', // 语音识别中
+  THINKING: 'thinking',   // 大模型流式生成中
+  SPEAKING: 'speaking',   // 数字人说话中
+};
+
+class AvatarChat {
+  state = ConversationState.IDLE;
+  pendingText = '';        // 待发送的大模型增量缓冲
+
+  async onUserSpeak(text) {
+    // 用户说完 → 打断当前说话，开始新一轮
+    sdk.interactiveidle();          // 打断，回待机
+    this.state = ConversationState.THINKING;
+    await this.streamFromLLM(text);
+  }
+
+  async streamFromLLM(userText) {
+    const stream = await callLLMStream(userText);
+    let isStart = true;
+
+    for await (const delta of stream) {
+      this.pendingText += delta;
+      if (this.pendingText.length >= 12) {   // 首段积攒缓冲
+        sdk.speak(this.pendingText, isStart, false);
+        isStart = false;
+        this.pendingText = '';
+        this.state = ConversationState.SPEAKING;
+      }
+    }
+    // 收尾
+    if (this.pendingText) {
+      sdk.speak(this.pendingText, isStart, true);
+    }
+    this.pendingText = '';
+  }
+
+  onVoiceStateChange(status) {
+    if (status === 'start') {
+      this.state = ConversationState.SPEAKING;
+    } else if (status === 'end') {
+      // 说完回待机，等待下一轮
+      sdk.interactiveidle();
+      this.state = ConversationState.IDLE;
+    }
+  }
+}
+```
+
+三个关键点：
+
+1. **用 `interactiveidle()` 做「打断」**：它既能打断当前说话回到待机，也是两轮对话之间必需的状态切换（官方明确 `speak` 不能连续多次调用）；
+2. **状态由 `onVoiceStateChange` 驱动**：不要用定时器猜时长，`voice_start` / `voice_end` 才是权威信号；
+3. **首段缓冲阈值可调**：`12` 字是我实测下来较舒服的默认值，缓冲越大开口越稳但首字延迟越高，可按场景微调。
+
+如果你还要接语音识别（ASR），前端可以用 Web Speech API 快速跑通：
+
+```js
+const recognition = new webkitSpeechRecognition();
+recognition.continuous = false;
+recognition.onresult = (e) => {
+  const text = e.results[0][0].transcript;
+  chat.onUserSpeak(text);
+};
+```
+
+这样「语音输入 → 大模型 → 数字人开口」的完整闭环就打通了。
+
+---
+
+## 七、它到底能做到什么程度
 
 魔珐官方给的技术指标是**端到端 500ms 超低延迟**——这意味着从大模型吐字到数字人开口，几乎同步。配上口型、表情、动作的实时联动，用户面对的不再是一个「打字机」，而是一个**能看、能听、能说、能比划的「人」**。
 
@@ -162,7 +240,7 @@ onVoiceStateChange(status) {
 
 ---
 
-## 七、福利与链接
+## 八、福利与链接
 
 - 🎁 邀请码 **XDZARL7NEP**：注册魔珐星云送 1000 积分
 - 🔗 在线体验：https://likebeans.github.io/xingyun3D/

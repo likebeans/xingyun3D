@@ -9,6 +9,8 @@ category: 技术
 
 上一篇文章我展示了「5 分钟接一个会说话的 3D 数字人」。这一篇往里走一层，拆解这套 SDK 的**设计结构和关键 API**，看看「语音 + 口型 + 表情 + 动作」到底是怎么在一个低延迟链路里联动的。
 
+![数字人说话时：语音、口型、表情、动作实时联动](images/blog-02-speaking.png)
+
 （在线体验：https://likebeans.github.io/xingyun3D/ ；源码：https://github.com/likebeans/xingyun3D ；注册邀请码 **XDZARL7NEP** 送 1000 积分。）
 
 ---
@@ -153,6 +155,10 @@ X-TOKEN = MD5( 小写路径 + 小写HTTP方法 + 排序JSON体 + Secret + 秒级
 ```
 
 这个算法官方 SDK 文档里没写，藏在另一篇 KA 接口文档里——这也是我踩坑篇里记录的坑 5。
+
+调通之后，能在前端直接看到自己的积分消耗记录：
+
+![积分消耗查询结果](images/blog-04-consume.png)
 
 ---
 

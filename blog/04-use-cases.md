@@ -9,6 +9,8 @@ category: 产品
 
 前面几篇一直在讲「怎么接」。这一篇换个视角，聊聊**接上之后能干什么**——毕竟技术最终要落到场景里。
 
+![数字人舞台（左）与控制台（右）](images/blog-01-idle.png)
+
 （在线体验：https://likebeans.github.io/xingyun3D/ ；源码：https://github.com/likebeans/xingyun3D ；注册邀请码 **XDZARL7NEP** 送 1000 积分。）
 
 ---

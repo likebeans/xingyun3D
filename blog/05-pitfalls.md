@@ -9,6 +9,10 @@ category: 实战
 
 我把魔珐星云的具身驱动 SDK 完整接了一遍，写成了开源项目 [likebeans/xingyun3D](https://github.com/likebeans/xingyun3D)。过程不算一帆风顺，踩了不少坑。这篇文章把这些坑、以及排查思路原样记录下来——**这些内容官方文档里要么没写，要么一笔带过**，希望能帮你省几个小时。
 
+（先看一下「填平这些坑之后」的正常效果，作为对照：）
+
+![数字人正常渲染、说话时字幕显示](images/blog-02-speaking.png)
+
 （在线体验：https://likebeans.github.io/xingyun3D/ ；注册邀请码 **XDZARL7NEP** 送 1000 积分。）
 
 ---

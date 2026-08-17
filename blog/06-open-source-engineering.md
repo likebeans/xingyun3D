@@ -9,6 +9,8 @@ category: 工程
 
 前几篇写了数字人的接入、踩坑、接大模型和落地场景。这一篇收个尾，讲讲这个开源项目背后的**工程化**——怎么让「填个 env 就能玩」这件事，从一句口号变成真正的自动化。
 
+![项目运行效果](images/blog-01-idle.png)
+
 （项目：https://github.com/likebeans/xingyun3D ；在线体验：https://likebeans.github.io/xingyun3D/ ；注册邀请码 **XDZARL7NEP** 送 1000 积分。）
 
 ---
