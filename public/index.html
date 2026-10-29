@@ -3,203 +3,117 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>星云具身驱动 · 数字人表演控制台</title>
+  <meta name="description" content="和数字人聊聊今天，来一场三轮情景对练，或送一句有心意的祝福。支持文字、语音和随时打断。">
+  <meta name="theme-color" content="#f4f2ee">
+  <title>星云 · 数字人互动空间</title>
   <script>
-    /* 主题先行设置，避免加载时闪烁：默认亮色，localStorage 记忆选择 */
     (function () {
       try {
-        var t = localStorage.getItem('xmoy-theme');
-        document.documentElement.dataset.theme = t === 'dark' ? 'dark' : 'light';
+        document.documentElement.dataset.theme = localStorage.getItem('xmoy-theme') === 'dark' ? 'dark' : 'light';
       } catch (e) {
         document.documentElement.dataset.theme = 'light';
       }
     })();
   </script>
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9' fill='%232fd6b4'/%3E%3Ccircle cx='16' cy='16' r='7' fill='none' stroke='%2306231c' stroke-width='3' stroke-dasharray='33 11' stroke-linecap='round'/%3E%3C/svg%3E">
-  <!-- 静态部署时由 GitHub Actions 覆写为构建注入的凭证；服务端模式下为空对象 -->
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='10' fill='%2324222b'/%3E%3Cpath d='m16 6 2.8 7.2L26 16l-7.2 2.8L16 26l-2.8-7.2L6 16l7.2-2.8Z' fill='%23d8ccff'/%3E%3C/svg%3E">
   <script src="config.js"></script>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-
-  <div id="setup-banner" class="banner hidden">
-    <strong>尚未配置应用凭证</strong>
-    <span id="setup-banner-text">请编辑项目根目录的 <code>.env</code>，填入 <code>XMOV_APP_ID</code> 与 <code>XMOV_APP_SECRET</code>（星云平台「应用中心」创建驱动应用后获取），然后重启服务。</span>
-  </div>
-
-  <div id="reconnect-banner" class="banner banner-warn hidden">
-    <strong>房间并发超限</strong>
-    <span>该驱动应用同时只允许一个会话。请关闭其它打开本页面的窗口/标签页，然后点击</span>
-    <button class="btn ghost sm" id="reconnect-btn">重新连接</button>
-  </div>
+  <a class="skip-link" href="#conversation-panel">跳到对话区</a>
+  <svg class="icon-sprite" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
+    <symbol id="icon-chat" viewBox="0 0 24 24"><path d="M21 11.5a8.4 8.4 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.4 8.4 0 0 1-3.8-.9L3 21l1.9-5.7a8.4 8.4 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.4 8.4 0 0 1 3.8-.9h.5a8.5 8.5 0 0 1 8 8v.5Z"/><path d="M8 10h8M8 14h5"/></symbol>
+    <symbol id="icon-spark" viewBox="0 0 24 24"><path d="m12 3 2.6 6.4L21 12l-6.4 2.6L12 21l-2.6-6.4L3 12l6.4-2.6L12 3ZM20 2v4M18 4h4"/></symbol>
+    <symbol id="icon-arrow" viewBox="0 0 24 24"><path d="M5 12h14m-6-6 6 6-6 6"/></symbol>
+    <symbol id="icon-mic" viewBox="0 0 24 24"><rect x="9" y="2" width="6" height="13" rx="3"/><path d="M5 10v2a7 7 0 0 0 14 0v-2M12 19v3M8 22h8"/></symbol>
+    <symbol id="icon-send" viewBox="0 0 24 24"><path d="m22 2-7 20-4-9-9-4L22 2ZM22 2 11 13"/></symbol>
+    <symbol id="icon-stop" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/></symbol>
+    <symbol id="icon-settings" viewBox="0 0 24 24"><path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="3"/><circle cx="15" cy="17" r="3"/></symbol>
+    <symbol id="icon-moon" viewBox="0 0 24 24"><path d="M20.5 13A8.5 8.5 0 0 1 11 3.5 8.5 8.5 0 1 0 20.5 13Z"/></symbol>
+    <symbol id="icon-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.5 1.5m11 11L19 19M5 19l1.5-1.5m11-11L19 5"/></symbol>
+    <symbol id="icon-restart" viewBox="0 0 24 24"><path d="M3 10a9 9 0 1 1 2 8M3 4v6h6"/></symbol>
+    <symbol id="icon-copy" viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="13" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h3"/></symbol>
+    <symbol id="icon-close" viewBox="0 0 24 24"><path d="m6 6 12 12M6 18 18 6"/></symbol>
+    <symbol id="icon-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></symbol>
+    <symbol id="icon-briefcase" viewBox="0 0 24 24"><rect x="3" y="7" width="18" height="14" rx="2"/><path d="M8 7V4h8v3M3 12a26 26 0 0 0 18 0M12 12v3"/></symbol>
+    <symbol id="icon-gift" viewBox="0 0 24 24"><rect x="3" y="8" width="18" height="4" rx="1"/><path d="M5 12v9h14v-9M12 8v13M12 8H8.5A2.5 2.5 0 1 1 11 5.5L12 8Zm0 0h3.5A2.5 2.5 0 1 0 13 5.5L12 8Z"/></symbol>
+    <symbol id="icon-orbit" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><ellipse cx="12" cy="12" rx="11" ry="5" transform="rotate(-35 12 12)"/><path d="m6 3 2 2m8 14 2 2"/></symbol>
+    <symbol id="icon-headphones" viewBox="0 0 24 24"><path d="M4 14v-3a8 8 0 0 1 16 0v3"/><rect x="2" y="12" width="5" height="8" rx="2"/><rect x="17" y="12" width="5" height="8" rx="2"/></symbol>
+  </svg>
 
   <header class="topbar">
-    <div class="brand">
-      <span class="brand-mark" aria-hidden="true"></span>
-      <div class="brand-text">
-        <h1>星云具身驱动 <span class="sub">演示控制台</span></h1>
-        <p>XINGYUN EMBODIED AVATAR · DEMO CONSOLE</p>
-      </div>
-    </div>
-    <div class="chips">
-      <span class="chip" id="net-chip"><i class="dot dot-muted"></i>网络 —</span>
-      <span class="chip" id="status-pill"><i class="dot dot-muted" id="status-dot"></i><span id="status-text">未连接</span></span>
-      <button class="btn ghost sm hidden" id="cred-btn" title="更换驱动应用凭证">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>
-        凭证
-      </button>
-      <button class="theme-toggle" id="theme-btn" aria-label="切换到暗色主题" title="亮色 / 暗色 主题">
-        <svg class="icon-moon" id="theme-icon-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>
-        <svg class="icon-sun hidden" id="theme-icon-sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.9 4.9 1.4 1.4"/><path d="m17.7 17.7 1.4 1.4"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.3 17.7-1.4 1.4"/><path d="m19.1 4.9-1.4 1.4"/></svg>
-        <span id="theme-label">暗色</span>
-      </button>
+    <a class="brand" href="./" aria-label="数字人互动空间首页">
+      <span class="brand-mark"><svg aria-hidden="true"><use href="#icon-spark"/></svg></span>
+      <span class="brand-wordmark">星云<span class="brand-divider">/</span><span>互动空间</span><small>DIGITAL ATELIER</small></span>
+    </a>
+    <span class="header-note">让每一次表达，都有回响。</span>
+    <div class="header-actions">
+      <span class="connection" role="status"><i class="dot" id="status-dot"></i><span id="status-text">等待连接</span></span>
+      <button class="btn ghost small" id="theme-btn" aria-label="切换到暗色主题"><svg aria-hidden="true"><use id="theme-icon" href="#icon-moon"/></svg><span id="theme-label">暗色</span></button>
+      <button class="btn ghost small" id="settings-btn"><svg aria-hidden="true"><use href="#icon-settings"/></svg>设置</button>
     </div>
   </header>
 
-  <main class="layout">
-
-    <!-- 数字人舞台 -->
-    <section class="stage-col">
-      <div class="stage" id="stage-wrap">
-        <div id="sdk" class="sdk-box"></div>
-
-        <div class="overlay" id="progress-overlay">
-          <p class="progress-num" id="progress-text">0%</p>
-          <div class="track"><div class="bar" id="progress-bar"></div></div>
-          <p class="progress-hint">正在下载数字人资源…</p>
-        </div>
-
-        <div class="voice-tag" id="voice-tag">
-          <i class="dot dot-muted" id="voice-dot"></i><span id="voice-text">待机</span>
-        </div>
-
-        <div class="subtitle" id="subtitle"></div>
+  <div class="app-shell">
+    <aside class="sidebar" aria-label="体验导航">
+      <div>
+        <div class="sidebar-heading"><span class="eyebrow">探索你的空间</span><span class="sidebar-star"><svg aria-hidden="true"><use href="#icon-spark"/></svg></span></div>
+        <nav class="mode-tabs" aria-label="选择玩法">
+          <button class="mode-tab active" data-mode="chat" aria-pressed="true"><span class="mode-icon"><svg aria-hidden="true"><use href="#icon-chat"/></svg></span><span class="mode-copy"><strong>聊聊今天</strong><small>给心情一点空间</small></span><span class="mode-index" aria-hidden="true">01</span></button>
+          <button class="mode-tab" data-mode="practice" aria-pressed="false"><span class="mode-icon"><svg aria-hidden="true"><use href="#icon-briefcase"/></svg></span><span class="mode-copy"><strong>陪我练练</strong><small>让表达多点底气</small></span><span class="mode-index" aria-hidden="true">02</span></button>
+          <button class="mode-tab" data-mode="blessing" aria-pressed="false"><span class="mode-icon"><svg aria-hidden="true"><use href="#icon-gift"/></svg></span><span class="mode-copy"><strong>送句祝福</strong><small>把心意认真说出口</small></span><span class="mode-index" aria-hidden="true">03</span></button>
+        </nav>
+        <div class="sidebar-guide"><span class="guide-line"></span><p>一点心事，<br>一次练习，<br><em>都值得被认真听见。</em></p></div>
       </div>
-      <p class="stage-note">SDK 仅支持 localhost / https · 建议 Chrome / Edge / Safari 最新版</p>
-    </section>
-
-    <!-- 控制台 -->
-    <aside class="console">
-
-      <section class="block">
-        <div class="block-head">
-          <h2><i class="idx">01</i>即兴说话</h2>
-          <button class="btn ghost sm" id="random-btn">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="4"/><circle cx="8.5" cy="8.5" r="1.4"/><circle cx="15.5" cy="15.5" r="1.4"/><circle cx="15.5" cy="8.5" r="1.4"/><circle cx="8.5" cy="15.5" r="1.4"/></svg>
-            随机台词
-          </button>
-        </div>
-        <p class="desc">输入任意文字，数字人实时合成语音、表情与口型（⌘ / Ctrl + Enter 发送）。</p>
-        <div class="say-row">
-          <textarea id="say-input" rows="2" maxlength="500"
-            placeholder="比如：大家好，我是魔珐星云的数字人主播，很高兴见到你们！"></textarea>
-          <button class="btn primary" id="send-btn" disabled>
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a3 3 0 0 1 3 3v6a3 3 0 0 1-6 0V5a3 3 0 0 1 3-3Z"/><path d="M19 10v1a7 7 0 0 1-14 0v-1"/><path d="M12 18v4"/></svg>
-            说话
-          </button>
-        </div>
-      </section>
-
-      <section class="block">
-        <h2><i class="idx">02</i>表演节目</h2>
-        <p class="desc">SSML + KA 动作指令：情绪、动作与台词一起演出来。</p>
-        <div class="btn-row">
-          <button class="btn primary" id="show-btn" disabled>
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2l2.4 6.2L21 10l-6.6 1.8L12 18l-2.4-6.2L3 10l6.6-1.8L12 2z"/><path d="M19 15l.9 2.4L22 18l-2.1.6L19 21l-.9-2.4L16 18l2.1-.6L19 15z"/></svg>
-            开场秀
-          </button>
-          <button class="btn ghost" id="stream-btn" disabled>
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7V5h16v2"/><path d="M9 20h6"/><path d="M12 5v15"/></svg>
-            流式播报
-          </button>
-        </div>
-        <div class="chip-row">
-          <button class="btn ghost sm" data-ka="dance" disabled>
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
-            跳舞
-          </button>
-          <button class="btn ghost sm" data-ka="hello" disabled>
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 11V6a2 2 0 0 0-4 0v5"/><path d="M14 10V4a2 2 0 0 0-4 0v6"/><path d="M10 10.5V6a2 2 0 0 0-4 0v8"/><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"/></svg>
-            打招呼
-          </button>
-          <button class="btn ghost sm" data-ka="welcome" disabled>
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15a5 5 0 0 0 5-5V7a5 5 0 0 0-10 0v3a5 5 0 0 0 5 5Z"/><path d="M19 19a7 7 0 0 0-14 0"/><path d="M12 21v-6"/></svg>
-            欢迎
-          </button>
-        </div>
-        <div class="demo-row">
-          <button class="btn demo" id="demo-btn" disabled>
-            <svg viewBox="0 0 24 24" aria-hidden="true"><polygon points="6 3 20 12 6 21 6 3"/></svg>
-            自动演示：完整跑一遍
-          </button>
-        </div>
-      </section>
-
-      <section class="block">
-        <h2><i class="idx">03</i>状态与音量</h2>
-        <p class="desc">多状态行为控制：待机 / 待机互动 / 在线离线 / 隐身，以及音量调节。</p>
-        <div class="btn-row wrap">
-          <button class="btn ghost sm" data-state="idle" disabled>
-            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M10 15V9"/><path d="M14 15V9"/></svg>
-            待机
-          </button>
-          <button class="btn ghost sm" data-state="interactive" disabled>
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2 3 14h7l-1 8 10-12h-7l1-8z"/></svg>
-            待机互动
-          </button>
-          <button class="btn ghost sm" data-state="offline" disabled>
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>
-            离线
-          </button>
-          <button class="btn ghost sm" data-state="online" disabled>
-            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.9 4.9 1.4 1.4"/><path d="m17.7 17.7 1.4 1.4"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.3 17.7-1.4 1.4"/><path d="m19.1 4.9-1.4 1.4"/></svg>
-            在线
-          </button>
-          <button class="btn ghost sm" data-state="invisible" disabled>
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 10 8 10 8a13.16 13.16 0 0 1-1.67 2.68"/><path d="M6.61 6.61A13.53 13.53 0 0 0 2 12s3 8 10 8a9.74 9.74 0 0 0 5.39-1.61"/><path d="M2 2l20 20"/><path d="M9.88 9.88a3 3 0 1 0 4.24 4.24"/></svg>
-            隐身
-          </button>
-        </div>
-        <div class="vol-row">
-          <label for="volume">音量</label>
-          <input type="range" id="volume" min="0" max="1" step="0.05" value="1">
-          <span class="vol-val" id="volume-val">100%</span>
-        </div>
-      </section>
-
-      <section class="block grow">
-        <div class="block-head">
-          <h2><i class="idx">04</i>实时事件</h2>
-          <button class="btn ghost sm" id="consume-btn">积分查询</button>
-        </div>
-        <div id="consume-result" class="consume hidden"></div>
-        <div class="log" id="log" aria-live="polite"></div>
-      </section>
-
+      <div class="sidebar-bottom"><svg aria-hidden="true"><use href="#icon-headphones"/></svg><p>选一个话题，<br>打字或开口就好。</p><span class="eyebrow">YOUR SPACE, YOUR PACE</span></div>
     </aside>
-  </main>
 
-  <!-- 凭证配置弹窗（静态部署 / GitHub Pages 下使用） -->
-  <div class="cred-modal hidden" id="cred-modal">
-    <div class="cred-card">
-      <h2>配置驱动应用凭证</h2>
-      <p class="desc">在 <a href="https://xingyun3d.com" target="_blank" rel="noreferrer">xingyun3d.com</a> 「应用中心」创建驱动应用后，填入 App ID 与 App Secret。凭证仅保存在当前浏览器。</p>
-      <label for="cred-appid">App ID</label>
-      <input id="cred-appid" autocomplete="off" spellcheck="false" placeholder="应用中心 → 驱动应用 → App ID">
-      <label for="cred-secret">App Secret</label>
-      <input id="cred-secret" type="password" autocomplete="off" spellcheck="false" placeholder="App Secret">
-      <label for="cred-gateway">网关地址（可选，留空使用官方默认）</label>
-      <input id="cred-gateway" autocomplete="off" spellcheck="false" placeholder="https://nebula-agent.xingyun3d.com/user/v1/ttsa/session">
-      <p class="cred-err" id="cred-err"></p>
-      <div class="cred-actions">
-        <button class="btn ghost sm" id="cred-clear">清除</button>
-        <button class="btn ghost sm" id="cred-cancel">取消</button>
-        <button class="btn primary" id="cred-save">保存并开始</button>
+    <main class="workspace">
+      <div class="workspace-heading"><div><span class="eyebrow">A MOMENT FOR YOURSELF</span><h1>此刻，<em>与你同频。</em></h1></div><p>一次聊天，一点勇气，一份心意。<span>从你想说的那一句开始。</span></p></div>
+      <div class="layout">
+        <section class="stage-col" aria-label="数字人舞台">
+          <div class="stage" id="stage-wrap">
+            <div class="stage-art" aria-hidden="true"><span class="stage-orbit orbit-one"></span><span class="stage-orbit orbit-two"></span><span class="stage-word">together.</span></div>
+            <div class="stage-preview" id="stage-preview"><img src="assets/avatar-preview.png" width="390" height="720" alt="数字人形象预览，连接后以你的应用角色为准"><span class="preview-label">形象预览 · 连接后以应用角色为准</span></div>
+            <div id="sdk" class="sdk-box"></div>
+            <div class="stage-top"><span class="stage-studio"><svg aria-hidden="true"><use href="#icon-orbit"/></svg>星云 · 对话现场</span><span class="voice-tag"><i class="dot" id="voice-dot"></i><span id="voice-text">准备见面</span></span></div>
+            <div class="stage-welcome" id="stage-welcome">
+              <div class="welcome-copy"><span class="welcome-kicker">不必完美表达</span><h2>你慢慢说，<br><em>我在这里。</em></h2><p>分享今天，也练习明天。<br>让想说的话，有一个温柔的落点。</p></div>
+              <button class="btn primary" id="connect-btn">开启这次相遇<svg aria-hidden="true"><use href="#icon-arrow"/></svg></button>
+            </div>
+            <div class="loading-overlay hidden" id="progress-overlay" aria-live="polite"><span class="loading-orbit"></span><span class="eyebrow">正在为你准备</span><strong id="progress-text">0%</strong><div class="progress-track"><div id="progress-bar"></div></div><p id="progress-hint">正在连接数字人…</p></div>
+            <div class="subtitle" id="subtitle"></div>
+            <div class="stage-bottom"><div><span class="stage-state-label"><i class="dot"></i><span id="stage-label">等你开口</span></span><strong id="stage-state">你的下一句话，有人认真听。</strong></div><button class="btn interrupt" id="interrupt-btn" disabled><svg aria-hidden="true"><use href="#icon-stop"/></svg>打断一下</button></div>
+          </div>
+          <div class="stage-footer"><span id="stage-state-hint">支持文字与语音，按你的节奏来。</span><a href="https://xingyun3d.com/developers/73-567" target="_blank" rel="noreferrer">魔珐星云驱动 <span aria-hidden="true">↗</span></a></div>
+        </section>
+
+        <section class="conversation-panel" id="conversation-panel" aria-label="聊天、情景对练和祝福" tabindex="-1">
+          <div class="panel-top"><span class="panel-identity"><i></i>此刻的对话<span>THE CONVERSATION</span></span><button class="icon-btn" id="restart-btn" title="重新开始这次对话" aria-label="重新开始"><svg aria-hidden="true"><use href="#icon-restart"/></svg></button></div>
+          <div class="scene-section"><div class="section-heading"><div><span class="eyebrow" id="mode-eyebrow">不必想好怎么说</span><h2 id="mode-title">选一种心情，慢慢聊。</h2></div><span class="section-count" id="scene-count">01 / 03</span></div><div class="scene-grid" id="scene-list"></div></div>
+          <div class="prompt-card" id="prompt-card"><span class="prompt-icon"><svg aria-hidden="true"><use href="#icon-spark"/></svg></span><div><span class="prompt-label" id="prompt-label">给你一个小提示</span><h3 id="prompt-title">不用组织好语言</h3><p id="prompt-body">从今天发生的一件小事开始就好。</p></div><span class="round-badge hidden" id="round-badge">第 1 / 3 轮</span></div>
+          <div class="conversation-heading"><span id="conversation-label">这次聊天</span><button class="text-btn" id="copy-btn" disabled><svg aria-hidden="true"><use href="#icon-copy"/></svg>复制记录</button></div>
+          <div class="messages" id="messages" role="log" aria-label="对话记录" aria-live="polite"><div class="empty-conversation" id="empty-conversation"><span class="empty-icon"><svg aria-hidden="true"><use href="#icon-spark"/></svg></span><h3 id="empty-title">有些话，说出来就轻松一点。</h3><p id="empty-description">选一句开场白，或者说说你自己的故事。</p><div class="example-list" id="example-list"></div><button class="btn primary hidden" id="start-practice-btn">开始三轮练习<svg aria-hidden="true"><use href="#icon-arrow"/></svg></button></div></div>
+          <div class="practice-actions hidden" id="practice-actions"><span id="practice-result-label">三轮练习完成，听听反馈吧。</span><div><button class="btn primary small" id="review-btn"><svg aria-hidden="true"><use href="#icon-spark"/></svg>生成点评</button><button class="btn ghost small" id="again-btn">再练一次</button><button class="btn ghost small" id="change-scene-btn">换个场景</button></div></div>
+          <div class="blessing-actions hidden" id="blessing-actions"><span id="blessing-result-label" role="status"></span><div><button class="btn ghost small" id="copy-blessing-btn"><svg aria-hidden="true"><use href="#icon-copy"/></svg>复制祝福</button><button class="btn ghost small" id="replay-blessing-btn"><svg aria-hidden="true"><use href="#icon-restart"/></svg>再听一次</button><button class="btn ghost small" id="new-blessing-btn">重新写一份</button></div></div>
+          <div class="inline-notice hidden" id="notice" role="status"><span id="notice-text"></span><button class="text-btn" id="retry-btn">重新开始</button><button class="icon-btn" id="notice-close" aria-label="关闭提示"><svg aria-hidden="true"><use href="#icon-close"/></svg></button></div>
+          <form class="composer" id="chat-form"><label class="sr-only" id="input-label" for="say-input">输入想说的话</label><textarea id="say-input" rows="2" maxlength="1200" placeholder="今天有什么想说的？" aria-describedby="composer-hint" disabled></textarea><div class="composer-bottom"><button class="btn mic-btn" id="mic-btn" type="button" disabled><svg aria-hidden="true"><use href="#icon-mic"/></svg><span id="mic-label">点击说话</span></button><span class="composer-hint" id="composer-hint">配置后就可以开始聊天</span><button class="btn primary send-btn" id="send-btn" type="submit" disabled><span id="send-label">发送</span><svg aria-hidden="true"><use href="#icon-arrow"/></svg></button></div></form>
+          <p class="panel-footnote"><span class="footnote-mark"><svg aria-hidden="true"><use href="#icon-spark"/></svg></span> AI 陪你探索，重要决定请结合自己的判断。</p>
+        </section>
       </div>
-    </div>
+    </main>
   </div>
 
-  <script src="https://media.xingyun3d.com/xingyun3d/general/litesdk/xmovAvatar@latest.js"></script>
+  <dialog class="settings-dialog" id="settings-dialog" aria-labelledby="settings-title">
+    <div class="dialog-heading"><div><span class="eyebrow">MAKE YOURSELF AT HOME</span><h2 id="settings-title">让这里，更像你的空间。</h2></div><button class="icon-btn" id="settings-close" aria-label="关闭设置"><svg aria-hidden="true"><use href="#icon-close"/></svg></button></div>
+    <section class="settings-section"><div class="settings-section-head"><h3>连接你的数字人</h3><span id="config-source">尚未配置</span></div><p class="help-text">在 <a href="https://xingyun3d.com" target="_blank" rel="noreferrer">魔珐星云</a> 创建应用，并配置好对话、语音识别和音色服务。保存后会重新连接。</p><form id="credential-form"><div class="credential-grid"><label>App ID<input id="cred-appid" autocomplete="off" spellcheck="false" required placeholder="应用中心的 App ID"></label><label>App Secret<input id="cred-secret" type="password" autocomplete="off" required placeholder="应用中心的 App Secret"></label></div><label class="gateway-label">网关地址<input id="cred-gateway" type="url" spellcheck="false" placeholder="https://nebula-agent.xingyun3d.com/user/v1/ttsa_v2/session"></label><p class="help-text">凭证保存在当前浏览器，连接时交给星云 SDK 使用。</p><p class="form-error" id="cred-error" role="alert"></p><div class="settings-buttons"><button class="btn ghost small" id="cred-clear" type="button">清除浏览器配置</button><button class="btn primary small" type="submit">保存并连接<svg aria-hidden="true"><use href="#icon-arrow"/></svg></button></div></form></section>
+    <section class="settings-section"><h3>给对话，加一点趣味</h3><p class="help-text">直接播报不经过 AI 对话。动作效果取决于当前角色支持的能力。</p><div class="action-row"><button class="btn ghost small" data-ka="hello" disabled>打个招呼</button><button class="btn ghost small" data-ka="dance" disabled>跳一支舞</button><button class="btn ghost small" data-ka="welcome" disabled>欢迎开场</button></div><div class="say-row"><label class="sr-only" for="speak-input">自定义播报文字</label><input id="speak-input" placeholder="写一句台词，让 TA 念给你听" maxlength="500"><button class="btn ghost small" id="speak-btn" disabled>播报</button></div><label class="volume-row" for="volume">音量<input id="volume" type="range" min="0" max="1" step="0.05" value="1"><span id="volume-value">100%</span></label></section>
+    <details class="settings-section diagnostics"><summary>连接信息与积分</summary><div class="diagnostic-heading"><span id="network-info">网络信息待连接</span><button class="text-btn" id="consume-btn">查询积分</button></div><div id="consume-result" class="consume-result hidden"></div><div class="event-log" id="event-log"></div><p class="help-text">Agent SDK 2.4.1 · 桌面 Web 体验</p></details>
+  </dialog>
+
+  <script src="https://media.xingyun3d.com/xingyun3d/general/litesdk/xmovAvatar_e2e.2.4.1.js"></script>
+  <script src="scenes.js"></script>
+  <script src="sdk-agent.js"></script>
   <script src="main.js"></script>
 </body>
 </html>

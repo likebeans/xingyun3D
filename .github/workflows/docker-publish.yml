@@ -1,6 +1,3 @@
-# 推送到 main 或打 v* 标签时，构建并发布 Docker 镜像到 GHCR：
-#   ghcr.io/likebeans/xingyun3d:latest
-# 其他人拉取方式见 README「Docker 一键运行」。
 name: Docker 镜像发布
 
 on:
@@ -8,14 +5,33 @@ on:
     branches: [main]
     tags: ['v*']
 
+permissions:
+  contents: read
+
+concurrency:
+  group: docker-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   publish:
+    if: github.event.repository.fork == false
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: read
       packages: write
+
     steps:
       - uses: actions/checkout@v4
+
+      - name: 生成镜像名
+        id: image
+        env:
+          REPOSITORY: ${{ github.repository }}
+        run: echo "name=ghcr.io/${REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+
+      - name: 设置 Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
       - name: 登录 GHCR
         uses: docker/login-action@v3
@@ -24,12 +40,25 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: 生成镜像标签与 OCI 元数据
+        id: metadata
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ steps.image.outputs.name }}
+          flavor: latest=false
+          tags: |
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,format=long
+            type=raw,value=latest,enable=${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
+
       - name: 构建并推送镜像
         uses: docker/build-push-action@v6
         with:
           context: .
           push: true
-          # GHCR 镜像名必须全小写，仓库名含大写字母，因此硬编码小写镜像名
-          tags: |
-            ghcr.io/likebeans/xingyun3d:latest
-            ghcr.io/likebeans/xingyun3d:${{ github.sha }}
+          tags: ${{ steps.metadata.outputs.tags }}
+          labels: ${{ steps.metadata.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

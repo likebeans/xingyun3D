@@ -1,0 +1,39 @@
+name: 功能建议
+description: 提议一个明确、可验证的改进
+title: "[Feature] "
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        欢迎提出建议。请勿提交 App Secret、Authorization、`.env` 内容或其他凭证。
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: 要解决的问题
+      description: 请描述使用场景和当前阻碍，不要只写功能名称。
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 建议方案
+      description: 描述期望的交互、行为或输出。
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: 已考虑的替代方案
+      description: 可选；说明目前如何绕过或为什么其他方案不合适。
+
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: 信息安全
+      options:
+        - label: 我确认以上内容不含凭证或敏感信息
+          required: true

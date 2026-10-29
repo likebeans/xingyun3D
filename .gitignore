@@ -1,5 +1,9 @@
 node_modules/
 .env
+.env.*
+!.env.example
+dist/
+coverage/
 tmp/
 .DS_Store
 .kun-canvas/

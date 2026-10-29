@@ -1,162 +1,217 @@
-# 星云具身驱动 · 数字人表演控制台
+# 星云具身驱动 · 数字人互动工作室
 
-基于 [魔珐星云具身驱动 SDK（JS 版本）](https://xingyun3d.com/developers/52-183) 的**零依赖**演示项目：
-一个页面跑通「创建实例 → 初始化房间 → 语音合成 → 表情口型 → 动作指令 → 状态控制 → 积分查询」完整接入流程，
-适合产品宣传演示、能力体验与技术验证。
+[![CI](https://github.com/likebeans/xingyun3D/actions/workflows/ci.yml/badge.svg)](https://github.com/likebeans/xingyun3D/actions/workflows/ci.yml)
+[![GitHub Pages](https://github.com/likebeans/xingyun3D/actions/workflows/pages.yml/badge.svg)](https://github.com/likebeans/xingyun3D/actions/workflows/pages.yml)
 
-![演示截图](docs/screenshot.png)
+这是一个基于魔珐星云 Agent SDK 2.4.1 的桌面 Web 示例。你可以和数字人聊天、完成三轮情景对练，或生成一段由数字人播报的祝福。
 
-## ✨ 功能玩法
+前端使用原生 HTML、CSS 和 JavaScript，Node 服务仅使用内置模块，没有第三方 npm 运行依赖。浏览器仍会从星云 CDN 加载 SDK，并连接 Agent、Brain、自动语音识别（ASR）和文本转语音（TTS）服务，因此对话与语音能力不能离线运行。
 
-| 玩法 | 对应能力 | 实现方式 |
+![新版对话工作室首页，未连接时展示数字人形象预览](docs/web-upgrade-preview.png)
+
+## 三种玩法
+
+| 玩法 | 你可以做什么 | 页面提供什么 |
 | --- | --- | --- |
-| 🎤 即兴说话 | 语音合成 + 口型同步 | 输入任意文字，`speak(text, true, true)` 整句播报 |
-| 🎲 随机台词 | 即兴互动 | 一键从台词池抽取有趣台词填入输入框 |
-| 📺 流式播报 | 对接大模型流式输出 | 台词按标点切块，定时逐段调用 `speak`（首段 `is_start=true`，末段 `is_end=true`） |
-| ⚡ 开场秀 / 跳舞 / 打招呼 | SSML + KA 动作指令 | `<ue4event>` 语义 KA（`ka_intent`）与技能 KA（`action_semantic`） |
-| 🎬 自动演示 | 全流程一键展示 | 脚本化串联：打招呼 → 自我介绍 → 流式播报 → 跳舞 → 谢幕，语音播完自动推进下一段，可随时停止 |
-| 🎛️ 状态遥控 | 多状态行为控制 | `idle()` / `interactiveidle()` / `onlineMode()` / `offlineMode()` / `switchInvisibleMode()` |
-| 📝 字幕条 | Widget 事件系统 | `onWidgetEvent` 路由 `subtitle_on` / `subtitle_off`，渲染到自绘字幕条 |
-| 📡 实时事件流 | 回调与日志系统 | 状态、语音、网络（rtt / 下行速率）、首帧渲染耗时实时上屏 |
-| 💰 积分查询 | 消耗查询接口 | 服务端代理 `GET /user/v1/external/consume_record`（含官方签名算法），规避浏览器跨域 |
-| 🌗 亮 / 暗主题 | 演示体验 | 一键切换，localStorage 记忆选择，默认亮色 |
+| 聊聊今天 | 选择安慰、吐槽或建议话题，也可以自由输入 | 文字与麦克风输入、当前页面内的对话记录 |
+| 陪我练练 | 完成模拟面试、提涨薪或自我介绍练习 | 三轮提示、进度显示、一个亮点和一个改进建议 |
+| 送句祝福 | 生成生日祝福、节日问候或加油鼓励 | 继续修改、复制正文、按原文重新播报 |
 
-## 🚀 快速开始
+播报期间可以点击“打断一下”。页面会停止当前播放并重建连接，保留本次记录、练习轮次和已完成的祝福。打断不能保证取消服务端已经开始的模型生成，并会新增一次连接。
 
-> 前置条件：先到 [xingyun3d.com](https://xingyun3d.com) 登录，在「应用中心」**创建驱动应用**
-> （选择角色、音色、表演风格），拿到 `App ID` 与 `App Secret`。
+设置面板还保留自定义播报、角色支持的 KA 动作、音量调节、积分查询和亮暗主题。页面按桌面浏览器设计，建议在 1280 px 及以上宽度使用。
 
-### 方式一：本地运行（Node ≥ 18.17，零依赖）
+![送句祝福页面，包含生日、节日和加油鼓励三个入口](docs/blessing-preview.png)
+
+## 三步启动
+
+推荐使用 Node.js 24 LTS，支持 Node.js 22 或更高版本。开始前，请在 [魔珐星云应用中心](https://xingyun3d.com) 准备支持新版 Agent 的应用：选择角色与音色，配置 Brain、ASR 和 TTS，确认账号有可用额度，并取得 App ID 与 App Secret。
+
+1. 克隆仓库并创建本地配置：
+
+   ```bash
+   git clone https://github.com/likebeans/xingyun3D.git
+   cd xingyun3D
+   cp .env.example .env
+   ```
+
+2. 编辑 `.env`，至少填写以下两项：
+
+   ```dotenv
+   XMOV_APP_ID=your_app_id
+   XMOV_APP_SECRET=your_app_secret
+   ```
+
+3. 启动服务，再打开[本地页面](http://localhost:3000)：
+
+   ```bash
+   npm start
+   ```
+
+项目没有第三方 npm 依赖，因此不需要先运行 `npm install`。你也可以保留 `.env` 中的凭证为空，启动页面后通过“设置”填写。
+
+## 配置如何生效
+
+页面按以下顺序选择第一组同时包含 App ID 和 App Secret 的配置：
+
+1. **当前浏览器**：在页面“设置”中保存，写入该浏览器的 localStorage。
+2. **本地服务**：Node 服务读取 `.env` 或进程环境变量，并通过 `/api/config` 提供给页面。
+3. **站点配置**：GitHub Pages 构建时写入公开的 `config.js`。
+
+浏览器配置的优先级最高。清除浏览器配置后，页面会回退到本地服务或站点配置，并在“设置”中显示当前来源。
+
+### 环境变量
+
+| 变量 | 会话必需 | 默认值或用途 |
+| --- | --- | --- |
+| `XMOV_APP_ID` | 是 | 支持新版 Agent 的应用 App ID |
+| `XMOV_APP_SECRET` | 是 | 对应应用的 App Secret |
+| `XMOV_GATEWAY_SERVER` | 否 | 默认使用新版 Agent 网关 `/user/v1/ttsa_v2/session` |
+| `XMOV_AUTHORIZATION` | 否 | 需要时传给浏览器 SDK 的 `Authorization` 请求头 |
+| `PORT` | 否 | Node 服务端口，默认 `3000` |
+
+服务端和页面会把已知的旧默认地址 `/user/v1/ttsa/session` 迁移到新版地址。仍建议更新自己的 `.env`，避免继续依赖兼容逻辑。
+
+### 凭证安全边界
+
+这个项目在浏览器中初始化星云 SDK，因此任何实际用于会话的凭证最终都会到达浏览器：
+
+- `.env` 已被 `.gitignore` 排除，但 Node 模式仍会通过 `/api/config` 把配置交给页面。
+- Pages 的仓库 Variables 会写入公开静态文件。Variables 和 Secrets 都不能让嵌入前端的值保持私密。
+- 浏览器设置保存在 localStorage，适合访问者使用自己的演示凭证，不应作为高安全等级的密钥存储。
+- 对外部署时，请使用独立的演示应用，限制额度与可用范围，不要使用生产凭证。
+
+## 其他运行方式
+
+### Docker
+
+在仓库目录中准备 `.env`，然后使用 Compose 构建并启动：
 
 ```bash
-# 1. 配置环境变量
 cp .env.example .env
-#    编辑 .env，填入 XMOV_APP_ID / XMOV_APP_SECRET
-
-# 2. 启动
-npm start            # 或 node server.js
-
-# 3. 浏览器打开
-#    http://localhost:3000
+# 编辑 .env 后继续
+docker compose up -d --build
 ```
 
-### 方式二：Docker 一键运行
-
-镜像由 GitHub Actions 自动构建并发布到 GHCR（`ghcr.io/likebeans/xingyun3d:latest`）：
+也可以直接使用 GitHub Container Registry（GHCR）镜像：
 
 ```bash
-# 使用 docker compose（推荐）
-git clone https://github.com/likebeans/xingyun3D.git
-cd xingyun3D
-cp .env.example .env      # 填入凭证
-docker compose up -d --build
-# 打开 http://localhost:3000
-
-# 或直接 docker run（无需克隆仓库）
-docker run -d -p 3000:3000 \
-  -e XMOV_APP_ID=你的AppID \
-  -e XMOV_APP_SECRET=你的AppSecret \
+docker run --rm -p 3000:3000 \
+  --env-file .env \
   ghcr.io/likebeans/xingyun3d:latest
 ```
 
-### 方式三：GitHub Codespaces（网页版一键体验）
+`main` 分支更新会发布 `latest`、`main` 和 `sha-<完整提交 SHA>` 标签；创建 `v1.2.3` 这类版本标签会发布 `1.2.3`、`1.2` 和 SHA 标签，版本发布不会覆盖 `latest`。
 
-1. 打开仓库主页 → 点击 **Code** → **Codespaces** → **新建 Codespace**；
-2. 环境已自动配置好 Node 20，并自动把 `.env.example` 复制为 `.env`；
-3. 填入 `XMOV_APP_ID` / `XMOV_APP_SECRET`，运行 `npm start`；
-4. 点击自动转发的 3000 端口即可开始玩。
+### GitHub Codespaces
 
-### 方式四：GitHub Pages 在线体验（无需本机）
+1. 在仓库主页选择 **Code → Codespaces → New codespace**。
+2. Codespace 会准备 Node.js 24，并把 `.env.example` 复制为 `.env`。
+3. 填写凭证，运行 `npm start`，再打开自动转发的 3000 端口。
 
-仓库内置 Pages 部署工作流，构建成功后即可通过网址直接访问：
+### GitHub Pages
 
-**https://likebeans.github.io/xingyun3D/**
+[Pages 站点](https://likebeans.github.io/xingyun3D/)是纯静态版本。首次部署前，在仓库 **Settings → Pages** 中把 Source 设为 **GitHub Actions**。
 
-凭证注入两种模式（二选一）：
+你可以选择一种凭证模式：
 
-- **让访问者打开即玩**：在仓库 **Settings → Secrets and variables → Actions → Variables** 中添加
-  `XMOV_APP_ID` / `XMOV_APP_SECRET`（可选 `XMOV_GATEWAY_SERVER` / `XMOV_AUTHORIZATION`），
-  然后重新运行「GitHub Pages 部署」工作流即可。
-  ⚠️ 这些值会**公开嵌入页面源码，任何人可见**，且所有访问者都会消耗该账号的积分——
-  请使用专门用于公开演示的低额度账号；
-- **访问者自己填**：不配置变量时，打开页面点击右上角「凭证」按钮，填写**自己的** App ID / Secret
-  （仅保存在该访问者的浏览器 localStorage，不会上传）。
+- **访问者自带凭证**：不设置仓库 Variables。访问者在页面“设置”中填写自己的 App ID 和 App Secret。
+- **公开演示凭证**：在 **Settings → Secrets and variables → Actions → Variables** 中设置 `XMOV_APP_ID` 和 `XMOV_APP_SECRET`，按需设置网关与 Authorization。构建脚本会使用 JSON 序列化生成 `config.js`。
 
-> 首次使用需在仓库 **Settings → Pages** 中将 Source 设为 **GitHub Actions**（一次性操作，之后每次推送自动部署）。
-> 静态版无服务端，积分查询按钮不可用；单会话限制（同一时间只能一人使用）同样适用。
+公开演示模式中的值对所有访问者可见，并会消耗对应应用的额度。Pages 不运行 Node 服务，因此不提供 `/api/consume` 积分查询代理。在线页面只反映 `main` 分支最近一次成功部署，本地未推送的改动不会立即出现。
 
-## ⚙️ 环境变量
+## 验证状态与范围
 
-| 变量 | 必填 | 说明 |
-| --- | --- | --- |
-| `XMOV_APP_ID` | ✅ | 驱动应用 App ID（应用中心创建后获取） |
-| `XMOV_APP_SECRET` | ✅ | 驱动应用 App Secret |
-| `XMOV_GATEWAY_SERVER` | 否 | 服务网关地址，默认 `https://nebula-agent.xingyun3d.com/user/v1/ttsa/session` |
-| `XMOV_AUTHORIZATION` | 否 | 自定义 `Authorization` 请求头，留空则不发送 |
-| `PORT` | 否 | 服务端口，默认 `3000` |
+本地检查可通过以下命令运行：
 
-`.env` 已加入 `.gitignore`，凭证不会提交到仓库；公开仓库请务必不要提交真实凭证。
-
-## 📁 项目结构
-
+```bash
+npm run check
+npm test
 ```
+
+`npm run check` 检查服务端、前端和工具脚本语法。`npm test` 检查 Pages 无凭证与特殊字符配置构建，并启动隔离的无凭证与假凭证服务，验证配置接口、网关兼容、静态资源和预期错误响应。测试不会向星云发起云端会话；CI 使用 Node.js 22 和 24 分别执行。
+
+已完成的本地验证包括：
+
+- 使用模拟 Agent 驱动聊天、三个三轮练习、点评和三个祝福模板。
+- 验证语音最终结果去重、打断后重建、复制与原文重播、旧实例回调隔离。
+- 检查 1280 × 800、1440 × 900 和 1920 × 1080 的桌面布局。
+- 检查亮暗主题、减少动态效果偏好和设置弹窗的键盘操作。
+
+真实平台验收尚未完成。最近一次真实网关请求返回“您的积分不足”，所以下列项目仍需在额度可用后验证：
+
+- Brain 的真实回答质量。
+- 麦克风识别与自动送问。
+- TTS 播报和数字人播放。
+- 目标应用在真实并发与额度条件下的行为。
+
+模拟测试不代表这些云端能力已经通过验收。手机和平板适配、登录、持久化历史、长久记忆、录屏导出和云端分享不在当前版本范围内。
+
+## 常见故障
+
+| 现象 | 检查与处理 |
+| --- | --- |
+| 点击开始后打开设置 | 当前没有完整凭证。填写 App ID 和 App Secret，或检查 `.env` 是否由正在运行的服务读取。 |
+| 提示“您的积分不足” | 在应用中心检查账号额度。该错误来自云端，重启本地服务不会恢复额度。 |
+| 初始化或连接失败 | 检查角色、音色、Brain、ASR、TTS 和网关配置。关闭重复标签页，排除应用并发限制。 |
+| 麦克风不可用 | 使用 `localhost` 或 HTTPS，授予录音权限，并检查系统输入设备。 |
+| 点击“结束监听”后仍在等待 | 页面正在等待最终识别结果。收到结果后才会继续，10 秒超时会重建连接。 |
+| Pages 中不能查询积分 | 这是预期行为。静态站点没有 Node 代理，请在本地或 Docker 模式查询。 |
+| 3000 端口已被占用 | 使用其他端口启动，例如 `PORT=3100 npm start`。 |
+
+首次初始化需要下载数字人素材。文本生成完成、语音播报完成和 ASR 结束是不同阶段，请以页面状态为准，不要在等待期间重复提交。
+
+## 项目结构
+
+```text
 xingyun3D/
-├── .env.example              # 环境变量模板（复制为 .env 后填写）
-├── server.js                 # 零依赖 Node 服务：注入配置 + 代理积分查询 + 静态文件
-├── package.json              # npm start（Node ≥ 18.17，无任何依赖）
-├── Dockerfile                # 容器镜像定义
-├── docker-compose.yml        # Docker 一键编排
-├── .devcontainer/            # GitHub Codespaces 一键环境
-├── .github/workflows/
-│   ├── ci.yml                # CI：语法检查 + 无凭证/假凭证启动冒烟测试
-│   ├── docker-publish.yml    # 推 main / v* 标签时构建并发布 GHCR 镜像
-│   └── pages.yml             # 推 main 时部署 GitHub Pages 在线版（可从仓库 Variables 注入凭证）
-├── docs/
-│   └── screenshot.png        # 演示截图
-└── public/
-    ├── index.html            # 演示页面：左侧数字人舞台 + 右侧控制台 + 凭证配置弹窗
-    ├── style.css             # 亮/暗双主题（CSS 变量驱动，含 prefers-reduced-motion 降级）
-    ├── config.js             # 静态部署配置（Pages 构建时覆写；服务端模式下为空对象）
-    └── main.js               # SDK 接入全流程 + 三级配置解析（服务端 / 构建注入 / 浏览器填写）
+├── .env.example                 # 本地环境变量模板
+├── server.js                    # 配置、积分代理和静态文件服务
+├── scripts/build-pages.js       # 安全生成 Pages 的公开 config.js
+├── public/
+│   ├── index.html               # 工作室页面与固定 SDK 引用
+│   ├── style.css                # 桌面布局和亮暗主题
+│   ├── config.js                # 静态站点配置入口
+│   ├── scenes.js                # 聊天、练习与祝福场景
+│   ├── sdk-agent.js             # XingyunAvatarAgent 薄封装
+│   ├── main.js                  # 页面交互与会话状态
+│   └── assets/                  # 本地静态图片
+├── .github/                     # CI、Pages、镜像和协作模板
+├── .devcontainer/               # Codespaces 配置
+├── Dockerfile
+└── docker-compose.yml
 ```
 
-## 🔌 接入流程（对照官方文档）
+## Agent SDK 接入
 
-1. **引入 SDK**：`<script src="https://media.xingyun3d.com/xingyun3d/general/litesdk/xmovAvatar@latest.js">`
-2. **创建实例**：`new XmovAvatar({ containerId, appId, appSecret, gatewayServer, headers, hardwareAcceleration, ...回调 })`
-3. **初始化房间**：`sdk.init({ onDownloadProgress, initModel: 'normal' })`（`onDownloadProgress` 为必填参数）
-4. **驱动说话**：`sdk.speak(ssml, is_start, is_end)`，支持整句与流式两种模式
-5. **状态控制**：`idle()` / `interactiveidle()` / `offlineMode()` / `onlineMode()` / `switchInvisibleMode()` / `setVolume()`
-6. **销毁**：页面卸载前调用 `sdk.destroy()`（官方最佳实践，也用于释放房间）
+项目固定加载：
 
-官方文档：[具身驱动接入文档（52-183）](https://xingyun3d.com/developers/52-183)
+```text
+https://media.xingyun3d.com/xingyun3d/general/litesdk/xmovAvatar_e2e.2.4.1.js
+```
 
-## 🔄 GitHub Actions 说明
+主要调用关系如下：
 
-| 工作流 | 触发时机 | 作用 |
-| --- | --- | --- |
-| `CI` | push / PR | 语法检查；无凭证启动应提示未配置；假凭证启动应正确注入配置；静态资源 200 |
-| `Docker 镜像发布` | push 到 main 或打 `v*` 标签 | 构建镜像并发布到 GHCR，产出 `ghcr.io/likebeans/xingyun3d:latest` |
-| `GitHub Pages 部署` | push 到 main / 手动触发 | 部署静态在线版到 `https://likebeans.github.io/xingyun3D/`，可从仓库 Variables 注入凭证 |
+1. `sdk-agent.js` 创建并管理唯一的 `XingyunAvatarAgent` 实例。
+2. 文字输入通过 `agent.ask(text)` 进入 Brain 对话链路。
+3. 语音输入通过 `startASR()` 和 `stopASR()` 管理采集。
+4. AI 文本通过 `onLLMResponse` 回填，整轮播报完成后恢复输入。
+5. `interrupt()` 停止当前播报；切换场景或重新开始时销毁旧实例。
+6. 固定开场中的 `<uievent>` 触发 Widget `show_text` 提示卡。
 
-> 首次发布后，仓库 Settings → Packages 中可看到该镜像包；Actions 使用自动生成的
-> `GITHUB_TOKEN`（具备 `packages: write` 权限），无需额外配置 Secret。
+查看[新版互动体验开发与验收记录](docs/web-upgrade-plan.md)，或阅读魔珐星云文档：
 
-## ⚠️ 注意事项
+- [升级指南](https://xingyun3d.com/developers/73-567)
+- [安装与集成](https://xingyun3d.com/developers/67-544)
+- [文本对话](https://xingyun3d.com/developers/68-547)
+- [语音识别](https://xingyun3d.com/developers/68-548)
+- [播报与完成事件](https://xingyun3d.com/developers/68-549)
+- [打断控制](https://xingyun3d.com/developers/68-550)
+- [Widget](https://xingyun3d.com/developers/68-553)
+- [Brain 配置](https://xingyun3d.com/developers/72-573)
 
-- **SDK 仅支持 `localhost` 或 `https` 访问**，直接以 IP + 端口访问会报错；
-- **一个驱动应用同时只允许一个会话**（错误码 `10005`）：请只开一个标签页；
-  若看到「房间并发超限」红色横幅，关闭其它标签页后点「重新连接」；
-- `speak` 不允许连续多次调用，一次说完后建议用 `interactiveidle()` 做状态切换
-  （自动演示已按此模式编排）；
-- 首次加载需下载数字人素材，**耐心等待进度条到 100%**（之后有缓存）；
-- 长时间不互动可切入**离线模式**，不消耗积分；调试阶段建议使用基础音色；
-- 建议使用最新版 Chrome / Edge / Safari。
+## 参与项目
 
-## 🛠️ 定制与宣传扩展
+提交改动前，请阅读[贡献指南](CONTRIBUTING.md)。发现安全问题时，请按[安全策略](SECURITY.md)中的方式私下报告，不要在公开 Issue 中提交凭证或漏洞细节。
 
-- **接入 LLM**：把「流式播报」的定时器换成大模型 SSE 流式接口，即成为实时 AI 数字人主播；
-- **场景化台词**：在 `public/main.js` 的 `KA` / `STREAM_TEXT` / `RANDOM_LINES` / `DEMO_SCRIPT`
-  中替换成产品发布会、门店导购、展厅讲解等脚本；
-- **对外部署**：镜像已支持任意容器平台（云服务器 / 内网），或部署到支持 Node 的 PaaS；
-  注意使用 https 域名访问。
+`blog/` 中的文章与截图记录的是升级前的表演控制台和旧 SDK 接法。新版接入请以当前 README、[开发计划](docs/web-upgrade-plan.md)和代码为准。

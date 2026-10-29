@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 私密报告安全问题
+    url: https://github.com/likebeans/xingyun3D/security/advisories/new
+    about: 安全漏洞和凭证泄露请私下报告，不要创建公开 Issue。

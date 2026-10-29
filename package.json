@@ -1,13 +1,16 @@
 {
   "name": "xingyun3d-avatar-demo",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
-  "description": "魔珐星云具身驱动SDK（JS）演示控制台 —— 零依赖示例",
+  "description": "魔珐星云 Agent SDK 桌面数字人互动与情景对练示例",
   "scripts": {
     "start": "node server.js",
-    "dev": "node server.js"
+    "dev": "node server.js",
+    "check": "node scripts/check.js",
+    "test": "node scripts/test-pages-build.js && node scripts/smoke-test.js",
+    "build:pages": "node scripts/build-pages.js"
   },
   "engines": {
-    "node": ">=18.17"
+    "node": ">=22"
   }
 }

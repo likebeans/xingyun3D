@@ -1,702 +1,832 @@
-/* 星云具身驱动 Demo —— 前端逻辑
- * 流程：/api/config 读取凭证 → new XmovAvatar 创建实例 → init 下载资源
- *      → speak（整句/流式/KA动作）→ 状态切换 / 音量 → destroy 销毁
- */
+/* 星云数字人互动空间：页面、场景与一次一轮的对话。 */
 'use strict';
 
-const $ = (sel) => document.querySelector(sel);
-const $$ = (sel) => Array.from(document.querySelectorAll(sel));
-
+const $ = (selector) => document.querySelector(selector);
+const $$ = (selector) => Array.from(document.querySelectorAll(selector));
+const DEFAULT_GATEWAY = 'https://nebula-agent.xingyun3d.com/user/v1/ttsa_v2/session';
 const els = {
-  banner: $('#setup-banner'),
-  reconnectBanner: $('#reconnect-banner'),
-  reconnectBtn: $('#reconnect-btn'),
-  overlay: $('#progress-overlay'),
-  progressBar: $('#progress-bar'),
-  progressText: $('#progress-text'),
-  subtitle: $('#subtitle'),
-  stage: $('#stage-wrap'),
-  statusDot: $('#status-dot'),
-  statusText: $('#status-text'),
-  netChip: $('#net-chip'),
-  voiceDot: $('#voice-dot'),
-  voiceText: $('#voice-text'),
-  input: $('#say-input'),
-  sendBtn: $('#send-btn'),
-  randomBtn: $('#random-btn'),
-  showBtn: $('#show-btn'),
-  streamBtn: $('#stream-btn'),
-  demoBtn: $('#demo-btn'),
-  volume: $('#volume'),
-  volumeVal: $('#volume-val'),
-  log: $('#log'),
-  consumeBtn: $('#consume-btn'),
-  consumeResult: $('#consume-result'),
-  setupBannerText: $('#setup-banner-text'),
-  credBtn: $('#cred-btn'),
-  credModal: $('#cred-modal'),
-  credAppId: $('#cred-appid'),
-  credSecret: $('#cred-secret'),
-  credGateway: $('#cred-gateway'),
-  credSave: $('#cred-save'),
-  credClear: $('#cred-clear'),
-  credCancel: $('#cred-cancel'),
-  credErr: $('#cred-err'),
+  stage: $('#stage-wrap'), preview: $('#stage-preview'), welcome: $('#stage-welcome'),
+  overlay: $('#progress-overlay'), progress: $('#progress-text'), bar: $('#progress-bar'),
+  subtitle: $('#subtitle'), input: $('#say-input'), messages: $('#messages'),
+  empty: $('#empty-conversation'), send: $('#send-btn'), mic: $('#mic-btn'),
+  micLabel: $('#mic-label'), hint: $('#composer-hint'), interrupt: $('#interrupt-btn'),
+  scenes: $('#scene-list'), examples: $('#example-list'), start: $('#start-practice-btn'),
+  actions: $('#practice-actions'), review: $('#review-btn'), round: $('#round-badge'),
+  dialog: $('#settings-dialog'), notice: $('#notice'), noticeText: $('#notice-text'),
 };
+const state = {
+  mode: 'chat', sceneId: 'comfort', ready: false, agentRunning: false, connecting: false,
+  busy: false, listening: false, micStarting: false, micStopping: false, acceptASR: false,
+  started: false, round: 0, reviewed: false, blessingText: '', config: null,
+  configSource: '尚未配置', serverConfig: null,
+};
+let session = null;
+let sessionGeneration = 0;
+let turn = null;
+let records = [];
+let initializationError = null;
+let micAttempt = 0;
+let asrFinalTimer = null;
+let resumeContext = '';
+let autoSendASR = true;
 
-let sdk = null;
-let streaming = false;
-let streamTimer = null;
-let demoRunning = false;
-let demoIndex = 0;
-let demoTimer = null;
-let demoWaitVoice = false;
+const selectedScene = () => window.AVATAR_SCENES[state.mode].find((scene) => scene.id === state.sceneId);
+const isPractice = () => state.mode === 'practice';
+const isBlessing = () => state.mode === 'blessing';
+const canAnswer = () => state.ready && state.agentRunning && !state.connecting && !state.busy && !state.micStopping && state.started &&
+  (!isPractice() || (state.round < 3 && !state.reviewed));
+const escapeHtml = (text) => String(text ?? '').replace(/[&<>"']/g, (c) =>
+  ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-/* ---------------- 主题切换（亮 / 暗） ---------------- */
-const themeBtn = $('#theme-btn');
-const themeSun = $('#theme-icon-sun');
-const themeMoon = $('#theme-icon-moon');
-const themeLabel = $('#theme-label');
-
-function applyTheme(theme, persist = true) {
+/* ---------------- 主题和配置 ---------------- */
+function applyTheme(theme) {
   document.documentElement.dataset.theme = theme;
-  if (persist) {
-    try { localStorage.setItem('xmoy-theme', theme); } catch (e) { /* ignore */ }
-  }
-  /* 亮色下展示“月亮 + 暗色”（点击切暗），暗色下反之 */
-  const wantDark = theme === 'light';
-  themeSun.classList.toggle('hidden', wantDark);
-  themeMoon.classList.toggle('hidden', !wantDark);
-  themeLabel.textContent = wantDark ? '暗色' : '亮色';
-  themeBtn.setAttribute('aria-label', wantDark ? '切换到暗色主题' : '切换到亮色主题');
+  $('#theme-icon').setAttribute('href', theme === 'dark' ? '#icon-sun' : '#icon-moon');
+  $('#theme-label').textContent = theme === 'dark' ? '亮色' : '暗色';
+  $('#theme-btn').setAttribute('aria-label', theme === 'dark' ? '切换到亮色主题' : '切换到暗色主题');
+  try { localStorage.setItem('xmoy-theme', theme); } catch (e) { /* 本次页面仍可切换主题 */ }
 }
 
-themeBtn.addEventListener('click', () => {
-  const cur = document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light';
-  applyTheme(cur === 'dark' ? 'light' : 'dark');
-});
-/* 与 <head> 中预置的主题同步图标（不重复写入 localStorage） */
-applyTheme(document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light', false);
-
-/* ---------------- 配置解析与凭证弹窗（静态部署） ---------------- */
-const DEFAULT_GATEWAY = 'https://nebula-agent.xingyun3d.com/user/v1/ttsa/session';
-
-/* 配置来源优先级：服务端（npm start / Docker）→ 构建注入（GitHub Pages Variables）
- * → 访问者浏览器内填写的凭证（localStorage） */
-async function resolveConfig() {
-  /* 1) 服务端模式：/api/config 存在且返回合法 JSON */
-  try {
-    const res = await fetch('/api/config', { headers: { Accept: 'application/json' } });
-    if (res.ok) {
-      const cfg = await res.json();
-      if (cfg && typeof cfg.configured === 'boolean') {
-        return { mode: 'server', cfg };
-      }
-    }
-  } catch (e) { /* 静态部署没有该接口，走下方分支 */ }
-
-  /* 2) 构建时注入（Pages 工作流从仓库 Variables 生成 config.js） */
-  const w = window.XMOV_CONFIG || {};
-  if (w.appId && w.appSecret) {
-    return {
-      mode: 'static',
-      cfg: {
-        configured: true,
-        appId: w.appId,
-        appSecret: w.appSecret,
-        gatewayServer: w.gatewayServer || DEFAULT_GATEWAY,
-        authorization: w.authorization || '',
-      },
-    };
-  }
-
-  /* 3) 访问者自己填写的凭证（仅存当前浏览器） */
-  try {
-    const saved = JSON.parse(localStorage.getItem('xmoy-cred') || 'null');
-    if (saved && saved.appId && saved.appSecret) {
-      return {
-        mode: 'static',
-        cfg: {
-          configured: true,
-          appId: saved.appId,
-          appSecret: saved.appSecret,
-          gatewayServer: saved.gatewayServer || DEFAULT_GATEWAY,
-          authorization: '',
-        },
-      };
-    }
-  } catch (e) { /* ignore */ }
-
-  return {
-    mode: 'static',
-    cfg: { configured: false, appId: '', appSecret: '', gatewayServer: DEFAULT_GATEWAY, authorization: '' },
-  };
-}
-
-function readSavedCred() {
+function readSavedConfig() {
   try { return JSON.parse(localStorage.getItem('xmoy-cred') || 'null'); } catch (e) { return null; }
 }
 
-function openCredModal() {
-  const saved = readSavedCred();
-  const w = window.XMOV_CONFIG || {};
-  els.credAppId.value = (saved && saved.appId) || w.appId || '';
-  els.credSecret.value = (saved && saved.appSecret) || w.appSecret || '';
-  els.credGateway.value = (saved && saved.gatewayServer) || w.gatewayServer || DEFAULT_GATEWAY;
-  els.credErr.textContent = '';
-  els.credModal.classList.remove('hidden');
-  els.credAppId.focus();
-}
-
-function closeCredModal() {
-  els.credModal.classList.add('hidden');
-}
-
-els.credSave.addEventListener('click', () => {
-  const appId = els.credAppId.value.trim();
-  const appSecret = els.credSecret.value.trim();
-  if (!appId || !appSecret) {
-    els.credErr.textContent = '请填写 App ID 与 App Secret';
-    return;
+function normalizeConfig(config) {
+  let gatewayServer = config.gatewayServer || DEFAULT_GATEWAY;
+  if (gatewayServer === 'https://nebula-agent.xingyun3d.com/user/v1/ttsa/session') {
+    gatewayServer = DEFAULT_GATEWAY;
   }
-  localStorage.setItem('xmoy-cred', JSON.stringify({
-    appId,
-    appSecret,
-    gatewayServer: els.credGateway.value.trim() || DEFAULT_GATEWAY,
-  }));
-  location.reload();
-});
+  return { ...config, gatewayServer, configured: Boolean(config.appId && config.appSecret) };
+}
 
-els.credClear.addEventListener('click', () => {
-  localStorage.removeItem('xmoy-cred');
-  location.reload();
-});
+async function loadConfig() {
+  try {
+    const response = await fetch('api/config', { headers: { Accept: 'application/json' } });
+    if (response.ok) {
+      const config = await response.json();
+      if (typeof config.configured === 'boolean') state.serverConfig = config;
+    }
+  } catch (e) { /* 静态站点使用 config.js 或浏览器填写的配置 */ }
+  const saved = readSavedConfig();
+  const built = window.XMOV_CONFIG || {};
+  const choices = [
+    [saved, '当前浏览器'], [state.serverConfig, '本地服务'], [built, '站点配置'],
+  ];
+  const chosen = choices.find(([config]) => config?.appId && config?.appSecret);
+  state.config = normalizeConfig(chosen ? chosen[0] : {});
+  state.configSource = chosen ? chosen[1] : '尚未配置';
+  $('#config-source').textContent = state.configSource;
+  updateControls();
+}
 
-els.credCancel.addEventListener('click', closeCredModal);
-els.credBtn.addEventListener('click', openCredModal);
+function openSettings() {
+  const config = state.config || {};
+  $('#cred-appid').value = config.appId || '';
+  $('#cred-secret').value = config.appSecret || '';
+  $('#cred-gateway').value = config.gatewayServer || DEFAULT_GATEWAY;
+  $('#cred-error').textContent = '';
+  els.dialog.showModal();
+}
 
-/* ---------------- 工具 ---------------- */
-const pad = (n) => String(n).padStart(2, '0');
-const now = () => {
-  const d = new Date();
-  return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
-};
-
-function log(text, level = 'info') {
+function log(text, error = false) {
   const line = document.createElement('div');
-  line.className = `log-line ${level}`;
-  line.textContent = `[${now()}] ${text}`;
-  els.log.appendChild(line);
-  while (els.log.children.length > 200) els.log.removeChild(els.log.firstChild);
-  els.log.scrollTop = els.log.scrollHeight;
+  line.textContent = `${new Date().toLocaleTimeString('zh-CN', { hour12: false })}  ${text}`;
+  if (error) line.className = 'error';
+  $('#event-log').appendChild(line);
+  while ($('#event-log').children.length > 60) $('#event-log').firstChild.remove();
+  $('#event-log').scrollTop = $('#event-log').scrollHeight;
 }
 
-const STATUS_LABEL = {
-  0: '在线', 1: '离线', 2: '网络恢复', 3: '网络断开',
-  4: '已关闭', 5: '隐身', 6: '可见', 7: '已停止',
-};
-
-const ERROR_LABEL = {
-  10001: '容器不存在', 10002: 'Socket连接错误', 10003: '会话启动错误',
-  10004: '会话停止错误', 10005: '超出房间并发限制，请调用 destroy() 释放连接',
-  20001: '视频抽帧错误', 20002: '抽帧Worker错误', 20003: '视频流处理错误',
-  20004: '表情处理错误', 30001: '背景图加载错误', 30002: '表情数据加载错误',
-  30003: 'body数据无Name', 30004: '视频下载错误', 40001: '音频解码错误',
-  40002: '表情解码错误', 40003: '身体视频解码错误', 40004: '事件解码错误',
-  40005: 'ttsa数据类型错误', 40006: 'ttsa下行异常',
-  50001: '离线模式', 50002: '在线模式', 50003: '网络重试', 50004: '网络断开',
-};
-
-function setStatus(status) {
-  const label = STATUS_LABEL[status] ?? `未知(${status})`;
-  els.statusText.textContent = label;
-  els.statusDot.className = 'dot ' +
-    ([0, 2, 6].includes(status) ? 'dot-ok'
-      : [1, 3, 4, 7].includes(status) ? 'dot-warn' : 'dot-muted');
+function showNotice(text, retry = false) {
+  els.noticeText.textContent = text;
+  $('#retry-btn').classList.toggle('hidden', !retry);
+  els.notice.classList.remove('hidden');
 }
 
-function setVoice(status) {
-  if (status === 'start') {
-    els.voiceDot.className = 'dot dot-live';
-    els.voiceText.textContent = '说话中';
-    els.stage.classList.add('live');
-  } else {
-    els.voiceDot.className = 'dot dot-muted';
-    els.voiceText.textContent = '待机';
-    els.stage.classList.remove('live');
-  }
+/* ---------------- 页面与消息 ---------------- */
+function setActivity(label, detail) {
+  $('#stage-label').textContent = label;
+  $('#voice-text').textContent = label;
+  $('#stage-state').textContent = detail;
 }
 
-function setControlsEnabled(on) {
-  els.sendBtn.disabled = !on || demoRunning;
-  els.showBtn.disabled = !on || demoRunning || streaming;
-  els.streamBtn.disabled = !on || demoRunning || streaming;
-  $$('[data-ka]').forEach((b) => (b.disabled = !on || demoRunning || streaming));
-  $$('[data-state]').forEach((b) => (b.disabled = !on));
-  els.demoBtn.disabled = !on;
+function updateControls() {
+  const available = canAnswer();
+  els.input.disabled = !available || state.listening || state.micStarting;
+  els.send.disabled = !available || state.listening || state.micStarting || !els.input.value.trim();
+  els.mic.disabled = !state.agentRunning || (!available && !state.listening) || state.micStarting;
+  els.mic.classList.toggle('listening', state.listening);
+  els.micLabel.textContent = state.micStarting ? '开启麦克风…' : state.micStopping ? '等待识别…' : state.listening ? '结束监听' : '点击说话';
+  els.interrupt.disabled = !state.ready || !state.agentRunning || (!state.busy && !state.listening && !state.micStarting && !state.micStopping);
+  els.start.disabled = !state.ready || !state.agentRunning || state.connecting || state.busy;
+  $('#restart-btn').disabled = state.connecting;
+  $$('[data-mode], .scene-card').forEach((button) => { button.disabled = state.connecting; });
+  $$('[data-ka], #speak-btn').forEach((button) => {
+    button.disabled = !state.ready || !state.agentRunning || state.busy || state.listening || state.micStarting || state.micStopping;
+  });
+  const needsReview = isPractice() && state.started && state.round >= 3;
+  els.actions.classList.toggle('hidden', !needsReview);
+  els.review.classList.toggle('hidden', state.reviewed);
+  els.review.disabled = state.busy || !state.ready || !state.agentRunning;
+  $('#again-btn').disabled = state.connecting || state.busy;
+  $('#change-scene-btn').disabled = state.connecting || state.busy;
+  $('#practice-result-label').textContent = state.reviewed
+    ? '这次练习完成了。下一次，试着再往前一步。'
+    : '三轮练习完成，听听反馈吧。';
+  const hasBlessing = isBlessing() && Boolean(state.blessingText);
+  $('#blessing-actions').classList.toggle('hidden', !hasBlessing);
+  $('#copy-blessing-btn').disabled = !hasBlessing;
+  $('#replay-blessing-btn').disabled = !hasBlessing || !available || state.listening || state.micStarting;
+  $('#new-blessing-btn').disabled = state.connecting || state.busy || state.listening || state.micStarting || state.micStopping;
+  $('#blessing-result-label').textContent = state.busy
+    ? turn?.kind === 'replay' ? '正在再播一遍这份祝福。' : '正在准备，完成后可以复制或继续修改。'
+    : '可以复制祝福，或在下方说说想怎样修改。';
+  $('#send-label').textContent = isBlessing() ? state.blessingText ? '修改祝福' : '生成祝福' : '发送';
+  $('#copy-btn').disabled = !records.some((message) => message.text);
+  $('#credential-form button[type="submit"]').disabled = state.connecting;
+  $('#cred-clear').disabled = state.connecting;
+  const canConsume = state.serverConfig?.configured && state.config?.appId === state.serverConfig.appId;
+  $('#consume-btn').disabled = !canConsume;
+  $('#consume-btn').title = canConsume ? '查询本地服务所配置应用的消耗记录' : '积分查询需要本地服务中的应用凭证';
+  els.hint.textContent = state.connecting ? '正在连接，请稍等'
+    : !state.ready ? isBlessing() ? '配置后就可以生成祝福' : '配置后就可以开始聊天'
+      : !state.agentRunning ? '连接正在恢复，请稍等'
+        : state.micStarting ? '请允许浏览器使用麦克风'
+        : state.micStopping ? '等待最后的识别结果，也可以打断取消'
+          : state.listening ? '说完停顿片刻，会自动开始回答'
+          : state.busy ? '正在接话，随时可以打断'
+            : needsReview ? '点击生成点评，或再练一次'
+              : isPractice() && !state.started ? '先点击上方按钮，开始这次练习'
+                : '⌘ / Ctrl + Enter 发送';
 }
 
-/* ---------------- 字幕 / Widget ---------------- */
-function extractText(data) {
-  if (data == null) return '';
-  if (typeof data === 'string') return data;
-  if (typeof data === 'object') {
-    return data.text || data.content || data.subtitle ||
-      data.sentence || data.data || JSON.stringify(data);
-  }
-  return String(data);
-}
-
-/* 高频内部 widget 事件，不写入日志面板 */
-const WIDGET_NOISE = new Set([
-  'text_times', 'face_ka_v2', 'break', 'voice_start', 'voice_end',
-  'speak_end', 'set_character_canvas_offset', 'text_state', 'clear',
-]);
-
-/* ---------------- KA 动作 / SSML ---------------- */
-const KA = {
-  welcome:
-    '<speak>热烈<ue4event><type>ka_intent</type><data><ka_intent>Welcome</ka_intent></data></ue4event>' +
-    '欢迎各位来到魔珐星云具身驱动演示现场！我可以实时生成语音、表情和动作，' +
-    '请在右侧输入任意文字，或者点击动作按钮，看我的表演吧！</speak>',
-  dance:
-    '<speak><ue4event><type>ka</type><data><action_semantic>dance</action_semantic></data></ue4event>' +
-    '音乐响起来，一起跳舞吧！</speak>',
-  hello:
-    '<speak><ue4event><type>ka</type><data><action_semantic>Hello</action_semantic></data></ue4event>' +
-    '你好呀，欢迎来到星云具身 3D 数字人平台，这里有超多精彩内容等你发现！</speak>',
-};
-
-const STREAM_TEXT =
-  '魔珐星云具身驱动，将 AI 的表达从文本升级为 3D 多模态：实时合成语音、表情与动作，' +
-  '驱动数字人或人形机器人，像真人一样自然交流。这段台词就是通过流式接口逐段送入的，' +
-  '模拟对接大模型的流式输出效果，首段先积攒一小段内容，保证口型与动作自然衔接。';
-
-/* 随机台词池 */
-const RANDOM_LINES = [
-  '大家好，我是魔珐星云的数字人主播，很高兴见到你们！',
-  '星云具身驱动，让 AI 从会思考，走向能表达、会交流。',
-  '我不仅能说话，还能根据语义做出自然的动作和表情，是不是很神奇？',
-  '听说点赞的朋友，今年都会有好运气哦！',
-  '要不要我给大家跳一支舞？音乐响起来！',
-  '我可以一口气播报新闻、讲解产品，还能陪你聊天，全年无休。',
-  '你知道吗，我的表情和口型都是实时合成的，不是提前录好的哦。',
-];
-
-/* 自动演示脚本：一段接一段，完整展示产品能力 */
-const DEMO_SCRIPT = [
-  { type: 'ka', label: '打招呼', text: KA.hello },
-  {
-    type: 'speak',
-    label: '自我介绍',
-    text: '大家好，欢迎来到星云具身驱动演示现场！我是一名由 AI 驱动的实时 3D 数字人，' +
-      '能够实时合成语音、表情和动作。接下来，请欣赏我的完整表演！',
-  },
-  {
-    type: 'stream',
-    label: '流式播报',
-    text: '接下来这段台词，模拟对接大语言模型的流式输出：AI 每生成一小段文字，我就同步开口，' +
-      '表情和口型实时匹配。这就是未来 AI 交互的模样——所见即所听，毫秒级响应。',
-  },
-  { type: 'ka', label: '跳舞', text: KA.dance },
-  {
-    type: 'speak',
-    label: '谢幕',
-    text: '表演到此结束！你也可以在右侧输入任意文字让我即兴播报，或者点击动作按钮随时让我开演。' +
-      '魔珐星云，让 AI 从会思考，走向能表达、会交流！',
-  },
-];
-
-/* 按标点切块，模拟大模型流式输出 */
-function chunkText(text, size = 12) {
-  let parts;
-  try {
-    parts = text.split(/(?<=[，。！？；：、\n])/);
-  } catch {
-    parts = [text];
-  }
-  const out = [];
-  let buf = '';
-  for (let p of parts) {
-    if (!p) continue;
-    while (p.length > size * 2) {
-      if (buf) { out.push(buf); buf = ''; }
-      out.push(p.slice(0, size));
-      p = p.slice(size);
-    }
-    if ((buf + p).length > size && buf) { out.push(buf); buf = p; }
-    else buf += p;
-  }
-  if (buf) out.push(buf);
-  return out.length ? out : [text];
-}
-
-/* ---------------- 说话 ---------------- */
-function speakNow(text) {
-  if (!sdk || !text || !text.trim()) return;
-  const t = text.trim();
-  try {
-    sdk.speak(t, true, true);
-    log(`speak（整句）：${t.length > 36 ? t.slice(0, 36) + '…' : t}`);
-  } catch (e) {
-    log(`speak 调用失败：${e.message}`, 'error');
-  }
-}
-
-/* 流式播报：首段 is_start=true，末段 is_end=true，其余均 false */
-function streamSpeak(text, onDone) {
-  if (!sdk || streaming) return;
-  const chunks = chunkText(text);
-  streaming = true;
-  setControlsEnabled(true);
-  log(`开始流式播报，共 ${chunks.length} 段`);
-  let i = 0;
-  const done = () => {
-    clearInterval(streamTimer);
-    streamTimer = null;
-    streaming = false;
-    setControlsEnabled(true);
-    log('流式播报结束');
-    if (typeof onDone === 'function') onDone();
-  };
-  streamTimer = setInterval(() => {
-    try {
-      sdk.speak(chunks[i], i === 0, i === chunks.length - 1);
-      log(`流式片段 ${i + 1}/${chunks.length}：${chunks[i]}`);
-    } catch (e) {
-      log(`流式 speak 失败：${e.message}`, 'error');
-      done();
-      return;
-    }
-    i++;
-    if (i >= chunks.length) done();
-  }, 320);
-}
-
-/* ---------------- 自动演示 ---------------- */
-function updateDemoBtn() {
-  els.demoBtn.textContent = demoRunning ? '停止演示' : '自动演示：完整跑一遍';
-  els.demoBtn.classList.toggle('running', demoRunning);
-}
-
-function startDemo() {
-  if (!sdk || demoRunning) return;
-  demoRunning = true;
-  demoIndex = 0;
-  demoWaitVoice = false;
-  setControlsEnabled(true);
-  updateDemoBtn();
-  log(`自动演示开始（共 ${DEMO_SCRIPT.length} 段）`);
-  demoTimer = setTimeout(() => {
-    try { sdk.interactiveidle(); } catch (e) { /* ignore */ }
-    demoTimer = setTimeout(demoNext, 500);
-  }, 600);
-}
-
-function stopDemo(silent) {
-  if (!demoRunning) return;
-  demoRunning = false;
-  demoWaitVoice = false;
-  clearTimeout(demoTimer);
-  /* 中断进行中的流式播报 */
-  if (streamTimer) {
-    clearInterval(streamTimer);
-    streamTimer = null;
-    streaming = false;
-  }
-  setControlsEnabled(true);
-  updateDemoBtn();
-  if (!silent) {
-    log('自动演示已停止');
-    try { sdk && sdk.interactiveidle(); } catch (e) { /* ignore */ }
-  }
-}
-
-function demoNext() {
-  if (!demoRunning) return;
-  const seg = DEMO_SCRIPT[demoIndex];
-  if (!seg) {
-    stopDemo(true);
-    log('自动演示结束，谢谢观看！');
-    return;
-  }
-  demoIndex++;
-  const step = `自动演示 ${demoIndex}/${DEMO_SCRIPT.length} · ${seg.label}`;
-  if (seg.type === 'stream') {
-    log(step);
-    streamSpeak(seg.text, () => {
-      if (!demoRunning) return;
-      demoTimer = setTimeout(() => {
-        try { sdk.interactiveidle(); } catch (e) { /* ignore */ }
-        demoTimer = setTimeout(demoNext, 900);
-      }, 700);
+function renderScenes() {
+  const scenes = window.AVATAR_SCENES[state.mode];
+  els.scenes.replaceChildren();
+  scenes.forEach((scene, index) => {
+    const button = document.createElement('button');
+    button.className = `scene-card${scene.id === state.sceneId ? ' active' : ''}`;
+    button.setAttribute('aria-pressed', String(scene.id === state.sceneId));
+    button.innerHTML = '<span class="scene-card-top"><span class="scene-card-number"></span><svg class="scene-card-check"><use href="#icon-check"/></svg></span><strong></strong><p></p>';
+    button.querySelector('.scene-card-number').textContent = `0${index + 1}`;
+    button.querySelector('strong').textContent = scene.title;
+    button.querySelector('p').textContent = scene.description;
+    button.addEventListener('click', () => selectScene(state.mode, scene.id));
+    els.scenes.appendChild(button);
+  });
+  const scene = selectedScene();
+  const index = scenes.findIndex((item) => item.id === state.sceneId);
+  $('#scene-count').textContent = `${String(index + 1).padStart(2, '0')} / ${String(scenes.length).padStart(2, '0')}`;
+  $('#mode-title').textContent = isPractice() ? '先在这里，勇敢一次。' : isBlessing() ? '把心意，说给重要的人。' : '选一种心情，慢慢聊。';
+  $('#mode-eyebrow').textContent = isPractice() ? '三轮就好，给自己一点底气' : isBlessing() ? '不用套话，也能好好表达' : '不必想好怎么说';
+  $('#conversation-label').textContent = isPractice() ? `${scene.title} · 三轮练习` : isBlessing() ? `${scene.title} · 这份心意` : '这次聊天';
+  $('#empty-title').textContent = isPractice() ? '先练一次，真正开口时更从容。' : isBlessing() ? '有些心意，值得认真说一次。' : '有些话，说出来就轻松一点。';
+  $('#empty-description').textContent = isPractice() ? scene.description : isBlessing() ? '选一句灵感，或写下对象、心意和想要的语气。' : '选一句开场白，或者说说你自己的故事。';
+  $('#input-label').textContent = isBlessing() ? '输入祝福对象、心意或修改要求' : '输入想说的话';
+  els.input.placeholder = scene.placeholder || (isPractice() ? '把你的回答写在这里…' : '今天有什么想说的？');
+  els.start.classList.toggle('hidden', !isPractice());
+  els.examples.classList.toggle('hidden', isPractice());
+  els.examples.replaceChildren();
+  scene.examples.forEach((text) => {
+    const button = document.createElement('button');
+    button.className = 'example-btn';
+    button.innerHTML = '<span></span><svg><use href="#icon-arrow"/></svg>';
+    button.querySelector('span').textContent = text;
+    button.addEventListener('click', () => {
+      els.input.value = text;
+      updateControls();
+      if (!state.ready) openSettings();
+      else if (canAnswer()) sendText();
     });
-  } else {
-    log(step);
-    speakNow(seg.text);
-    demoWaitVoice = true; /* 等语音播完再进入下一段 */
+    els.examples.appendChild(button);
+  });
+  $$('[data-mode]').forEach((button) => {
+    const active = button.dataset.mode === state.mode;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-pressed', String(active));
+  });
+  updatePrompt();
+  updateControls();
+}
+
+function updatePrompt(title, body) {
+  const scene = selectedScene();
+  const prompt = scene.prompts[Math.min(state.round, scene.prompts.length - 1)];
+  $('#prompt-label').textContent = isPractice() ? '本轮小提示' : isBlessing() ? '让祝福更像你' : '给你一个小提示';
+  $('#prompt-title').textContent = title || prompt?.title || '不用组织好语言';
+  $('#prompt-body').textContent = body || prompt?.body || '从今天发生的一件小事开始就好。';
+  els.round.classList.toggle('hidden', !isPractice());
+  els.round.textContent = state.reviewed ? '练习完成' : state.round >= 3 ? '3 / 3 已完成' : `第 ${state.round + 1} / 3 轮`;
+}
+
+function resetMicrophone() {
+  micAttempt++;
+  clearTimeout(asrFinalTimer);
+  asrFinalTimer = null;
+  state.listening = false;
+  state.micStarting = false;
+  state.micStopping = false;
+  state.acceptASR = false;
+}
+
+function clearConversation() {
+  resetMicrophone();
+  resumeContext = '';
+  records = [];
+  turn = null;
+  state.started = false;
+  state.round = 0;
+  state.reviewed = false;
+  state.blessingText = '';
+  state.busy = false;
+  $$('#messages .message').forEach((message) => message.remove());
+  els.empty.classList.remove('hidden');
+  els.input.value = '';
+  els.subtitle.classList.remove('show');
+  els.stage.classList.remove('live');
+  $('#voice-dot').className = 'dot';
+  updatePrompt();
+}
+
+function addMessage(role, text, pending = false) {
+  els.empty.classList.add('hidden');
+  const node = document.createElement('div');
+  node.className = `message ${role}${pending ? ' pending' : ''}`;
+  const name = document.createElement('span');
+  name.className = 'message-name';
+  name.textContent = role === 'user' ? '你' : '星云伙伴';
+  const body = document.createElement('div');
+  body.className = 'message-body';
+  body.textContent = text;
+  node.append(name, body);
+  els.messages.appendChild(node);
+  const message = { role, text, node, body };
+  records.push(message);
+  scrollMessages();
+  updateControls();
+  return message;
+}
+
+function scrollMessages() {
+  els.messages.scrollTop = els.messages.scrollHeight;
+}
+
+function rollbackSubmission(activeTurn) {
+  const submission = activeTurn?.submission;
+  if (!submission) return;
+  activeTurn.submission = null;
+  const index = records.indexOf(submission.message);
+  if (index >= 0) records.splice(index, 1);
+  submission.message.node.remove();
+  state.round = submission.round;
+  if (!els.input.value) els.input.value = submission.draft;
+  if (!records.some((message) => message.text)) els.empty.classList.remove('hidden');
+  updatePrompt();
+}
+
+function beginTurn(kind, text = '') {
+  state.busy = true;
+  turn = { kind, reply: text ? addMessage('assistant', text) : null, text: '', llmDone: false, speechEnded: false };
+  setActivity(['opening', 'direct', 'replay'].includes(kind) ? '正在说话' : '想一想', kind === 'review' ? '正在回顾你的表达…' : kind === 'blessing' ? '正在把你的心意，写成一段祝福。' : '你的话，我认真接住了。');
+  updateControls();
+  return turn;
+}
+
+function finishTurn() {
+  if (!turn) return;
+  const completed = turn;
+  turn = null;
+  state.busy = false;
+  if (completed.reply) completed.reply.node.classList.remove('pending');
+  if (completed.kind === 'review') state.reviewed = true;
+  if (completed.kind === 'setup' && isBlessing()) {
+    els.messages.appendChild(els.empty);
+    els.empty.classList.remove('hidden');
+  }
+  if (completed.kind === 'direct' && isPractice() && !state.started) {
+    els.empty.classList.remove('hidden');
+    els.messages.scrollTop = 0;
+  }
+  els.stage.classList.remove('live');
+  $('#voice-dot').className = 'dot online';
+  els.subtitle.classList.remove('show');
+  setActivity('等你开口', state.reviewed ? '练习完成。你已经比刚才更有底气了。' : '我在听，接下来想说什么？');
+  updatePrompt();
+  updateControls();
+  if (completed.kind !== 'direct' || state.started || !isPractice()) scrollMessages();
+  if (completed.kind === 'opening') {
+    queueMicrotask(() => askForScene());
+  } else if (canAnswer()) {
+    els.input.focus({ preventScroll: true });
   }
 }
 
-/* ---------------- 主流程 ---------------- */
-async function main() {
-  const { mode, cfg } = await resolveConfig();
+function failTurn(error) {
+  const message = error?.message || String(error);
+  if (turn?.submission) rollbackSubmission(turn);
+  if (state.listening || state.micStarting || state.micStopping) {
+    session?.stopASR().catch((stopError) => log(stopError.message, true));
+  }
+  if (turn?.kind === 'setup') state.started = false;
+  if (turn?.reply && !turn.reply.text) turn.reply.body.textContent = '这次没有接上话，重新试试吧。';
+  turn = null;
+  state.busy = false;
+  resetMicrophone();
+  els.stage.classList.remove('live');
+  showNotice(message, !state.ready || !state.started);
+  log(message, true);
+  setActivity('稍等一下', '这次没有接上话，可以重新试试。');
+  updateControls();
+}
 
-  if (!cfg.configured) {
-    if (mode === 'server') {
-      els.banner.classList.remove('hidden');
-      log('未检测到应用凭证：请编辑 .env 后重启服务', 'error');
-    } else {
-      els.credBtn.classList.remove('hidden');
-      els.banner.classList.remove('hidden');
-      els.banner.querySelector('strong').textContent = '未配置驱动应用凭证';
-      els.setupBannerText.innerHTML =
-        '静态部署页面：点击右上角 <strong>凭证</strong> 按钮，填写你的驱动应用 App ID / App Secret（仅保存在当前浏览器）。';
-      openCredModal();
-      log('静态部署未配置凭证：请填写驱动应用凭证后开始', 'warn');
+/* ---------------- SDK 回调与连接 ---------------- */
+function handleWidget(event) {
+  const payload = event.data || event;
+  if (event.type === 'show_text') {
+    updatePrompt(payload.title, payload.text_content || payload.text);
+  } else if (event.type === 'subtitle_on') {
+    const text = typeof payload === 'string' ? payload : payload.text || payload.content || payload.subtitle;
+    if (text) {
+      els.subtitle.textContent = text;
+      els.subtitle.classList.add('show');
     }
-    return;
+  } else if (event.type === 'subtitle_off') {
+    els.subtitle.classList.remove('show');
   }
+}
 
-  if (mode === 'static') {
-    els.credBtn.classList.remove('hidden');
-    /* 静态版无服务端，积分查询依赖服务端代理，直接禁用 */
-    els.consumeBtn.disabled = true;
-    els.consumeBtn.title = '静态部署无服务端代理，积分查询不可用';
-    log(`静态部署模式：已读取凭证（${readSavedCred() ? '当前浏览器填写' : '构建时注入'}）`);
+function handleLLM(response) {
+  if (state.connecting || !turn || ['opening', 'direct', 'replay'].includes(turn.kind)) return;
+  if (!turn.reply) turn.reply = addMessage('assistant', '', true);
+  if (response.event === 'chunk') {
+    if (response.isFirst) turn.text = '';
+    turn.text += response.text || '';
+  } else if (response.event === 'done') {
+    turn.llmDone = true;
+    if (response.text) turn.text = response.text;
+    if (turn.kind === 'blessing' && turn.text.trim()) {
+      state.blessingText = turn.text;
+      updateControls();
+    }
   }
+  turn.reply.text = turn.text;
+  turn.reply.body.textContent = turn.text || '正在想怎么回答你…';
+  turn.reply.node.classList.remove('pending');
+  scrollMessages();
+  if (turn.llmDone && turn.speechEnded) finishTurn();
+}
 
-  if (typeof window.XmovAvatar !== 'function') {
-    els.banner.querySelector('strong').textContent = 'SDK 脚本加载失败';
-    els.banner.classList.remove('hidden');
-    log('XmovAvatar SDK 加载失败，请检查网络后刷新页面', 'error');
-    return;
-  }
+function handleASR(result) {
+  if (!state.acceptASR || !state.ready || !state.agentRunning || !state.started) return;
+  els.input.value = result.text;
+  if (!result.isFinal || !result.text.trim()) return;
+  resetMicrophone();
+  addMessage('user', result.text.trim());
+  els.input.value = '';
+  if (isPractice()) state.round++;
+  const activeTurn = beginTurn(isBlessing() ? 'blessing' : 'answer');
+  updatePrompt();
+  // 默认由 SDK 自动送问；打断重建后改为手动携带恢复语境，只提交一次。
+  if (!autoSendASR) void askInContext(result.text.trim(), activeTurn);
+  const activeSession = session;
+  queueMicrotask(() => {
+    if (session === activeSession) activeSession.stopASR().catch((error) => log(error.message, true));
+  });
+}
 
-  log(`初始化数字人（appId: ${cfg.appId.slice(0, 8)}…）`);
+function waitForASRFinal() {
+  if (!state.acceptASR || state.micStopping) return;
+  state.micStarting = false;
+  state.listening = false;
+  state.micStopping = true;
+  const activeSession = session;
+  asrFinalTimer = setTimeout(() => {
+    if (session !== activeSession || !state.acceptASR) return;
+    showNotice('没有等到最终识别结果，正在重新建立连接。');
+    void interrupt();
+  }, 10000);
+  setActivity('等待识别', '收音已结束，正在等待最后的识别结果。');
+  updateControls();
+}
 
-  try {
-    sdk = new XmovAvatar({
-      containerId: '#sdk',
-      appId: cfg.appId,
-      appSecret: cfg.appSecret,
-      gatewayServer: cfg.gatewayServer,
-      headers: cfg.authorization ? { Authorization: cfg.authorization } : {},
-      hardwareAcceleration: 'prefer-hardware',
-      enableLogger: false,
-      /* 字幕：onWidgetEvent 优先级最高，会接管所有 widget 事件，
-       * 因此直接在回调中路由 subtitle_on / subtitle_off 到自绘字幕条 */
-      onWidgetEvent: (data) => {
-        const type = data && data.type;
-        if (type === 'subtitle_on') {
-          const t = extractText(data);
-          if (t) {
-            els.subtitle.textContent = t;
-            els.subtitle.classList.add('show');
-          }
-          return;
-        }
-        if (type === 'subtitle_off') {
-          els.subtitle.classList.remove('show');
-          return;
-        }
-        /* 高频内部事件（逐字时间码/表情帧/分段等）不刷屏 */
-        if (WIDGET_NOISE.has(type)) return;
-        if (type === 'ka') {
-          const act = data?.data?.action_semantic || data?.data?.ka_intent || '';
-          if (!act || data?.data?.deleted) return;
-          log(`KA 动作：${act}`);
-          return;
-        }
-        log(`widget 事件：${JSON.stringify(data).slice(0, 120)}`);
-      },
-      onVoiceStateChange: (status) => {
-        setVoice(status);
-        log(`语音状态：${status}`);
-        /* 自动演示：当前段说完后进入下一段（避免连续 speak） */
-        if (status === 'end' && demoRunning && demoWaitVoice) {
-          demoWaitVoice = false;
-          demoTimer = setTimeout(() => {
-            try { sdk.interactiveidle(); } catch (e) { /* ignore */ }
-            demoTimer = setTimeout(demoNext, 900);
-          }, 700);
-        }
-      },
-      onStateChange: (state) => log(`数字人状态：${state}`),
-      onStatusChange: (status) => setStatus(status),
-      onStateRenderChange: (state, duration) =>
-        log(`状态「${state}」首帧渲染耗时 ${duration}ms`),
-      onNetworkInfo: (info) => {
-        els.netChip.innerHTML = '';
-        const dot = document.createElement('i');
-        dot.className = 'dot dot-ok';
-        els.netChip.appendChild(dot);
-        els.netChip.appendChild(
-          document.createTextNode(
-            `网络 rtt ${info.rtt ?? '-'}ms · ${(info.downlink ?? 0).toFixed(2)} MB/s`
-          )
-        );
-      },
-      onMessage: (message) => {
-        const label = ERROR_LABEL[message.code] || message.message || '';
-        const isErr = message.code >= 40000 || message.code === 10005;
-        log(`SDK 消息 [${message.code}] ${label}`, isErr ? 'error' : 'warn');
-        /* 房间并发超限：同时只允许一个会话，给出明确提示和一键重连 */
-        if (message.code === 10005) {
-          els.reconnectBanner.classList.remove('hidden');
-        }
-      },
-      onStartSessionWarning: (warning) => {
-        log(`会话配置警告：${JSON.stringify(warning).slice(0, 160)}`, 'warn');
-      },
-    });
-  } catch (e) {
-    log(`创建实例失败：${e.message}`, 'error');
-    return;
-  }
-
-  /* 初始化连接房间（onDownloadProgress 为必填参数） */
-  sdk.init({
-    initModel: 'normal',
-    onDownloadProgress: (progress) => {
-      const p = Math.max(0, Math.min(100, Number(progress) || 0));
-      els.progressBar.style.width = p + '%';
-      els.progressText.textContent = p + '%';
-      if (p >= 100) {
-        els.overlay.classList.add('hidden');
-        log('资源加载完成，数字人就绪');
-        setControlsEnabled(true);
+function createCallbacks(generation = sessionGeneration) {
+  const isCurrentSession = () => generation === sessionGeneration;
+  return {
+    onProgress(progress) {
+      if (!isCurrentSession()) return;
+      const percent = Math.round(progress);
+      els.progress.textContent = `${percent}%`;
+      els.bar.style.width = `${percent}%`;
+      if (percent >= 100) $('#progress-hint').textContent = '资源已就绪，正在建立对话连接…';
+    },
+    onAgentStateChange(status) {
+      if (!isCurrentSession()) return;
+      log(`连接：${status}`);
+      state.agentRunning = status === 'running';
+      if (state.agentRunning) {
+        state.ready = true;
+        $('#status-text').textContent = '已连接';
+        $('#status-dot').className = 'dot online';
+      } else if (['failed', 'stopped', 'destroyed'].includes(status)) {
+        state.ready = false;
+        $('#status-text').textContent = status === 'failed' ? '连接失败' : '已断开';
+        $('#status-dot').className = 'dot';
+        if (!state.connecting) showNotice('连接已结束，点击重新开始。', true);
+      } else {
+        $('#status-text').textContent = status === 'reconnecting' ? '正在重连' : '正在连接';
+        $('#status-dot').className = 'dot';
+      }
+      if (!state.connecting || state.ready) updateControls();
+      if (state.agentRunning && !state.connecting && !state.started && !isPractice()) queueMicrotask(() => askForScene());
+    },
+    onASRStateChange(status) {
+      log(`麦克风：${status}`);
+      state.micStarting = ['requesting-permission', 'starting'].includes(status);
+      state.listening = status === 'listening';
+      if (state.listening) setActivity('正在听', '说完停顿片刻，我就接着回答。');
+      if (['stopping', 'idle'].includes(status)) waitForASRFinal();
+      if (status === 'failed') resetMicrophone();
+      updateControls();
+    },
+    onASRResult: handleASR,
+    onLLMResponse: handleLLM,
+    onSpeakStateChange(event) {
+      if (event.state === 'speak_start') {
+        els.stage.classList.add('live');
+        $('#voice-dot').className = 'dot live';
+        setActivity('正在说话', '想插一句？随时点「打断一下」。');
+      } else if (event.state === 'speak_end') {
+        if (!turn) return;
+        turn.speechEnded = true;
+        if (turn.llmDone || ['opening', 'direct', 'replay'].includes(turn.kind)) finishTurn();
+      } else if (event.state === 'speak_error') {
+        failTurn(new Error('这次播报没有完成，请重试。'));
       }
     },
-  });
-
-  /* ---------------- 控件绑定 ---------------- */
-  els.sendBtn.addEventListener('click', () => speakNow(els.input.value));
-  els.input.addEventListener('keydown', (e) => {
-    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') speakNow(els.input.value);
-  });
-  els.showBtn.addEventListener('click', () => speakNow(KA.welcome));
-  els.streamBtn.addEventListener('click', () => streamSpeak(STREAM_TEXT));
-
-  /* 自动演示：开始 / 停止 */
-  els.demoBtn.addEventListener('click', () => {
-    if (demoRunning) stopDemo(false);
-    else startDemo();
-  });
-
-  /* 随机台词：填充输入框 */
-  els.randomBtn.addEventListener('click', () => {
-    els.input.value = RANDOM_LINES[Math.floor(Math.random() * RANDOM_LINES.length)];
-    els.input.focus();
-  });
-
-  $$('[data-ka]').forEach((btn) => {
-    btn.addEventListener('click', () => speakNow(KA[btn.dataset.ka]));
-  });
-
-  const stateActions = {
-    idle: () => sdk.idle(),
-    interactive: () => sdk.interactiveidle(),
-    offline: () => sdk.offlineMode(),
-    online: () => sdk.onlineMode(),
-    invisible: () => sdk.switchInvisibleMode(),
+    onConversationChange(event) {
+      log(`对话：${event.state}`);
+      if (event.state === 'failed' && turn) failTurn(new Error('暂时没有收到回答，请检查应用的对话服务配置。'));
+      if (event.state === 'interrupted' && !state.connecting && (turn || state.listening || state.micStarting || state.micStopping)) void interrupt();
+    },
+    onVoiceStateChange(status) {
+      if (status === 'start') $('#voice-dot').className = 'dot live';
+    },
+    onWidgetEvent: handleWidget,
+    onNetworkInfo(info) {
+      $('#network-info').textContent = `网络 RTT ${Math.round(info.rtt || 0)} ms`;
+    },
+    onMessage(message) {
+      log(`SDK [${message.code}] ${message.message || ''}`, message.code === 10005);
+    },
+    onError(error) {
+      if (!isCurrentSession()) return;
+      if (state.connecting) initializationError ||= error;
+      else failTurn(error);
+    },
   };
-  $$('[data-state]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      try {
-        stateActions[btn.dataset.state]();
-        log(`执行状态动作：${btn.textContent.trim()}`);
-      } catch (e) {
-        log(`状态切换失败：${e.message}`, 'error');
-      }
-    });
-  });
-
-  els.volume.addEventListener('input', () => {
-    const v = parseFloat(els.volume.value);
-    els.volumeVal.textContent = Math.round(v * 100) + '%';
-    try {
-      sdk.setVolume(v);
-    } catch (e) {
-      log(`设置音量失败：${e.message}`, 'error');
-    }
-  });
-
-  els.consumeBtn.addEventListener('click', async () => {
-    els.consumeBtn.disabled = true;
-    try {
-      const res = await fetch('/api/consume');
-      renderConsume(await res.json());
-    } catch (e) {
-      els.consumeResult.classList.remove('hidden');
-      els.consumeResult.innerHTML = `<p class="consume-err">查询失败：${e.message}</p>`;
-    } finally {
-      els.consumeBtn.disabled = false;
-    }
-  });
-
-  /* 页面卸载前销毁实例（官方最佳实践） */
-  window.addEventListener('beforeunload', () => {
-    try {
-      sdk && sdk.destroy();
-    } catch (e) { /* ignore */ }
-  });
-
-  /* 并发超限后一键重连：销毁旧实例并刷新 */
-  els.reconnectBtn.addEventListener('click', () => {
-    try {
-      sdk && sdk.destroy();
-    } catch (e) { /* ignore */ }
-    location.reload();
-  });
 }
 
-/* ---------------- 积分消耗渲染 ---------------- */
-function renderConsume(data) {
-  els.consumeResult.classList.remove('hidden');
-  if (data.error_code && data.error_code !== 0) {
-    els.consumeResult.innerHTML =
-      `<p class="consume-err">查询失败 [${data.error_code}]：${data.error_reason || '未知错误'}</p>`;
+async function connectScenario(options = {}) {
+  if (state.connecting) return;
+  const resume = options.resume === true;
+  if (!state.config?.configured) { openSettings(); return; }
+  state.connecting = true;
+  state.ready = false;
+  state.agentRunning = false;
+  initializationError = null;
+  if (resume) resetMicrophone();
+  else clearConversation();
+  els.notice.classList.add('hidden');
+  els.overlay.classList.remove('hidden');
+  els.welcome.classList.add('hidden');
+  els.preview.classList.remove('hidden');
+  els.progress.textContent = '0%';
+  els.bar.style.width = '0%';
+  $('#progress-hint').textContent = '正在连接数字人…';
+  $('#status-text').textContent = '正在连接';
+  $('#status-dot').className = 'dot';
+  setActivity('准备见面', '稍等一下，马上就能开聊。');
+  updateControls();
+  try {
+    if (session) await session.destroy();
+    const generation = ++sessionGeneration;
+    session = new window.AvatarSession(createCallbacks(generation));
+    autoSendASR = !resume;
+    await session.init({ ...state.config, autoSendASR });
+    state.ready = true;
+    state.connecting = false;
+    session.setVolume(Number($('#volume').value));
+    els.overlay.classList.add('hidden');
+    els.preview.classList.add('hidden');
+    $('#status-text').textContent = '已连接';
+    $('#status-dot').className = 'dot online';
+    $('#voice-dot').className = 'dot online';
+    setActivity('等你开口', isPractice() ? '准备好了，就开始这次练习。' : isBlessing() ? '这份心意，想送给谁？' : '今天的故事，从你开始。');
+    log(`已连接，配置来源：${state.configSource}`);
+    updateControls();
+    if (resume) {
+      if (state.started) resumeContext = buildResumeContext();
+      setActivity('等你开口', '停下来了，准备好后可以继续。');
+      updateControls();
+    } else if (!isPractice()) await askForScene();
+  } catch (error) {
+    state.ready = false;
+    state.agentRunning = false;
+    state.connecting = false;
+    els.overlay.classList.add('hidden');
+    els.welcome.classList.remove('hidden');
+    $('#connect-btn').innerHTML = '<svg><use href="#icon-restart"/></svg>重新连接';
+    $('#status-text').textContent = '连接失败';
+    failTurn(initializationError || error);
+  }
+}
+
+async function selectScene(mode, id) {
+  if (state.connecting || (state.mode === mode && state.sceneId === id)) return;
+  state.mode = mode;
+  state.sceneId = id;
+  clearConversation();
+  renderScenes();
+  if (state.config?.configured) await connectScenario();
+}
+
+function buildResumeContext() {
+  const history = records.filter((message) => message.text && !message.node.querySelector('.message-caption')).map((message) =>
+    `${message.role === 'user' ? '用户' : '数字人'}：${message.text}`).join('\n');
+  const progress = isPractice() ? `用户已回答 ${state.round} / 3 轮，点评${state.reviewed ? '已' : '未'}完成。` : '';
+  const blessing = isBlessing() && state.blessingText ? `最近一份完整祝福：${state.blessingText}` : '';
+  return `${selectedScene().setup}\n上一次播放已停止。以下记录仅供恢复语境，不作为新的用户请求：\n${history}\n${progress}\n${blessing}`;
+}
+
+async function askInContext(text, activeTurn) {
+  const activeSession = session;
+  const context = resumeContext;
+  const request = context ? `${context}\n请直接回应以下新的请求，不要另外播报恢复话术：\n${text}` : text;
+  try {
+    await activeSession.ask(request);
+    activeTurn.submission = null;
+    if (session === activeSession && turn === activeTurn) {
+      if (resumeContext === context) resumeContext = '';
+      return true;
+    }
+  } catch (error) {
+    if (session === activeSession && turn === activeTurn) failTurn(error);
+  }
+  return false;
+}
+
+async function askForScene() {
+  if (!state.ready || !state.agentRunning || state.busy) return;
+  state.started = true;
+  const activeSession = session;
+  const activeTurn = beginTurn('setup');
+  try {
+    const opening = isPractice() ? '练习，并提出第一个问题' : isBlessing() ? '祝福创作，邀请我说说祝福对象和心意，先不要生成祝福，不超过40字' : '聊天，不超过40字';
+    await activeSession.ask(`${selectedScene().setup}\n请先用一句简短的话开始这次${opening}。`);
+  } catch (error) {
+    if (session === activeSession && turn === activeTurn) failTurn(error);
+  }
+}
+
+function startPractice() {
+  if (!state.ready || !state.agentRunning || state.busy || state.started) return;
+  const scene = selectedScene();
+  const prompt = scene.prompts[0];
+  beginTurn('opening', scene.opening);
+  const ssml = `<speak><uievent><type>show_text</type><data><title>${escapeHtml(prompt.title)}</title><text_content>${escapeHtml(prompt.body)}</text_content></data></uievent>${escapeHtml(scene.opening)}</speak>`;
+  try { session.speak(ssml); } catch (error) { failTurn(error); }
+}
+
+async function sendText() {
+  const draft = els.input.value;
+  const text = draft.trim();
+  if (!text || !canAnswer() || state.listening || state.micStarting) return;
+  state.acceptASR = false;
+  const previousRound = state.round;
+  const message = addMessage('user', text);
+  if (els.input.value === draft) els.input.value = '';
+  if (isPractice()) state.round++;
+  const activeTurn = beginTurn(isBlessing() ? 'blessing' : 'answer');
+  activeTurn.submission = { message, draft, round: previousRound };
+  updatePrompt();
+  await askInContext(text, activeTurn);
+}
+
+async function reviewPractice() {
+  if (!state.ready || !state.agentRunning || state.busy || state.round < 3 || state.reviewed) return;
+  const activeTurn = beginTurn('review');
+  await askInContext(selectedScene().review, activeTurn);
+}
+
+async function toggleMicrophone() {
+  if (!session || state.micStarting || state.micStopping) return;
+  const activeSession = session;
+  if (state.listening) {
+    waitForASRFinal();
+    try { await activeSession.stopASR(); } catch (error) {
+      if (session === activeSession && state.acceptASR) failTurn(error);
+    }
     return;
   }
-  const rows = (data.data || []).slice(0, 6);
-  if (!rows.length) {
-    els.consumeResult.innerHTML = '<p class="consume-err">暂无消耗记录</p>';
-    return;
+  if (!canAnswer()) return;
+  const attempt = ++micAttempt;
+  state.acceptASR = true;
+  state.micStarting = true;
+  updateControls();
+  try {
+    await activeSession.startASR();
+  } catch (error) {
+    if (session === activeSession && attempt === micAttempt) failTurn(error);
+  } finally {
+    if (session === activeSession && attempt === micAttempt) {
+      state.micStarting = false;
+      updateControls();
+    }
   }
-  els.consumeResult.innerHTML = `
-    <table>
-      <thead><tr><th>应用</th><th>积分</th><th>时长</th><th>开始时间</th></tr></thead>
-      <tbody>${rows.map((r) => `
-        <tr>
-          <td>${escapeHtml(r.app_name || '-')}</td>
-          <td>${r.amount ?? '-'}</td>
-          <td>${r.duration ?? '-'}s</td>
-          <td>${escapeHtml(formatTime(r.start_time))}</td>
-        </tr>`).join('')}
-      </tbody>
-    </table>`;
 }
 
-function escapeHtml(s) {
-  return String(s ?? '').replace(/[&<>"']/g, (c) =>
-    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-}
-
-function formatTime(ts) {
-  if (!ts) return '-';
-  const fmt = (d) =>
-    `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
-  if (typeof ts === 'string') {
-    const iso = new Date(ts);
-    if (!isNaN(iso.getTime())) return fmt(iso);
-    const n = Number(ts);
-    if (!isNaN(n)) return formatTime(n);
-    return ts;
+function stopTurn() {
+  const interruptedOpening = turn?.kind === 'opening';
+  const interruptedSetup = turn?.kind === 'setup';
+  if (interruptedSetup && isPractice()) state.started = false;
+  if ((interruptedOpening || interruptedSetup || turn?.kind === 'direct') && isPractice() && !state.started) {
+    els.empty.classList.remove('hidden');
+    els.messages.scrollTop = 0;
   }
-  const n = Number(ts);
-  const d = new Date(n < 1e12 ? n * 1000 : n);
-  return isNaN(d.getTime()) ? String(ts) : fmt(d);
+  if (turn?.reply) {
+    if (!turn.reply.text) {
+      turn.reply.text = '这次先停在这里。';
+      turn.reply.body.textContent = turn.reply.text;
+    }
+    const caption = document.createElement('span');
+    caption.className = 'message-caption';
+    caption.textContent = '已停止播报';
+    turn.reply.node.classList.remove('pending');
+    turn.reply.node.appendChild(caption);
+  }
+  turn = null;
+  state.busy = false;
+  els.stage.classList.remove('live');
+  els.subtitle.classList.remove('show');
+  $('#voice-dot').className = 'dot online';
+  setActivity('等你开口', '停下来了，你接着说。');
+  if (interruptedOpening) showNotice('开场已停止，点击重新开始这次练习。', true);
+  updateControls();
 }
 
+async function interrupt() {
+  if (!session || !state.ready || !state.agentRunning || state.connecting) return;
+  const activeSession = session;
+  const wasListening = state.listening || state.micStarting || state.micStopping;
+  state.connecting = true;
+  resetMicrophone();
+  stopTurn();
+  try { activeSession.interrupt(); } catch (error) { log(error.message, true); }
+  if (wasListening) {
+    try { await activeSession.stopASR(); } catch (error) { log(error.message, true); }
+  }
+  state.connecting = false;
+  state.agentRunning = false;
+  await connectScenario({ resume: true });
+}
+
+function directSpeak(text) {
+  if (!state.ready || !state.agentRunning || state.connecting || state.busy || state.listening || state.micStarting || state.micStopping || !text.trim()) return;
+  beginTurn('direct', text.replace(/<(uievent|ue4event)>[\s\S]*?<\/\1>/g, '').replace(/<[^>]*>/g, ''));
+  try { session.speak(text); } catch (error) { failTurn(error); }
+}
+
+function replayBlessing() {
+  if (!isBlessing() || !state.blessingText || !canAnswer() || state.listening || state.micStarting) return;
+  beginTurn('replay');
+  try { session.speak(`<speak>${escapeHtml(state.blessingText)}</speak>`); } catch (error) { failTurn(error); }
+}
+
+/* ---------------- 控件绑定 ---------------- */
+$('#theme-btn').addEventListener('click', () => applyTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'));
+$('#settings-btn').addEventListener('click', openSettings);
+$('#settings-close').addEventListener('click', () => els.dialog.close());
+$('#connect-btn').addEventListener('click', () => state.config?.configured ? connectScenario() : openSettings());
+$('#retry-btn').addEventListener('click', connectScenario);
+$('#notice-close').addEventListener('click', () => els.notice.classList.add('hidden'));
+$('#restart-btn').addEventListener('click', connectScenario);
+$('#again-btn').addEventListener('click', connectScenario);
+$('#change-scene-btn').addEventListener('click', () => {
+  const scenes = window.AVATAR_SCENES.practice;
+  const index = scenes.findIndex((scene) => scene.id === state.sceneId);
+  selectScene('practice', scenes[(index + 1) % scenes.length].id);
+});
+$$('[data-mode]').forEach((button) => button.addEventListener('click', () => {
+  const mode = button.dataset.mode;
+  if (state.mode !== mode) selectScene(mode, window.AVATAR_SCENES[mode][0].id);
+}));
+$('#chat-form').addEventListener('submit', (event) => { event.preventDefault(); sendText(); });
+els.input.addEventListener('input', updateControls);
+els.input.addEventListener('keydown', (event) => {
+  if ((event.metaKey || event.ctrlKey) && event.key === 'Enter' && !event.isComposing) {
+    event.preventDefault();
+    sendText();
+  }
+});
+els.mic.addEventListener('click', toggleMicrophone);
+els.interrupt.addEventListener('click', interrupt);
+els.start.addEventListener('click', startPractice);
+els.review.addEventListener('click', reviewPractice);
+$('#copy-blessing-btn').addEventListener('click', async () => {
+  if (!isBlessing() || !state.blessingText) return;
+  try {
+    await navigator.clipboard.writeText(state.blessingText);
+    $('#blessing-result-label').textContent = '祝福已复制，可以粘贴到你想发送的地方。';
+  } catch (error) { showNotice('浏览器没有允许复制，可以直接选中祝福文字复制。'); }
+});
+$('#replay-blessing-btn').addEventListener('click', replayBlessing);
+$('#new-blessing-btn').addEventListener('click', connectScenario);
+
+$('#credential-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  if (state.connecting) return;
+  const config = normalizeConfig({
+    appId: $('#cred-appid').value.trim(), appSecret: $('#cred-secret').value.trim(),
+    gatewayServer: $('#cred-gateway').value.trim(),
+  });
+  if (!config.configured) { $('#cred-error').textContent = '请填写 App ID 和 App Secret。'; return; }
+  try { localStorage.setItem('xmoy-cred', JSON.stringify(config)); } catch (e) { log('浏览器无法保存凭证，本次页面仍可使用。'); }
+  state.config = config;
+  state.configSource = '当前浏览器';
+  $('#config-source').textContent = state.configSource;
+  els.dialog.close();
+  await connectScenario();
+});
+$('#cred-clear').addEventListener('click', async () => {
+  if (state.connecting) return;
+  try { localStorage.removeItem('xmoy-cred'); } catch (e) { /* 继续清除当前页面配置 */ }
+  els.dialog.close();
+  await loadConfig();
+  if (state.config.configured) { await connectScenario(); return; }
+  if (session) await session.destroy();
+  session = null;
+  sessionGeneration++;
+  state.ready = false;
+  state.agentRunning = false;
+  clearConversation();
+  els.preview.classList.remove('hidden');
+  els.welcome.classList.remove('hidden');
+  $('#connect-btn').innerHTML = '<svg><use href="#icon-spark"/></svg>配置后开始';
+  $('#status-text').textContent = '等待连接';
+  $('#status-dot').className = 'dot';
+  setActivity('准备见面', '你的下一句话，有人认真听。');
+  updateControls();
+});
+
+const KA = {
+  hello: '<speak><ue4event><type>ka</type><data><action_semantic>Hello</action_semantic></data></ue4event>你好呀！很高兴在这里见到你。</speak>',
+  dance: '<speak><ue4event><type>ka</type><data><action_semantic>dance</action_semantic></data></ue4event>休息一下，一起放松放松吧！</speak>',
+  welcome: '<speak><ue4event><type>ka_intent</type><data><ka_intent>Welcome</ka_intent></data></ue4event>欢迎来到星云互动空间。今天想聊聊心事，还是练练表达？</speak>',
+};
+$$('[data-ka]').forEach((button) => button.addEventListener('click', () => {
+  directSpeak(KA[button.dataset.ka]);
+  els.dialog.close();
+}));
+$('#speak-btn').addEventListener('click', () => {
+  const text = $('#speak-input').value.trim();
+  if (!text) return;
+  directSpeak(text);
+  els.dialog.close();
+});
+$('#volume').addEventListener('input', (event) => {
+  const volume = Number(event.target.value);
+  $('#volume-value').textContent = `${Math.round(volume * 100)}%`;
+  if (state.ready && state.agentRunning) session.setVolume(volume);
+});
+$('#copy-btn').addEventListener('click', async () => {
+  const text = `${selectedScene().title}\n\n${records.filter((message) => message.text).map((message) => `${message.role === 'user' ? '我' : '数字人'}：${message.text}`).join('\n\n')}`;
+  try {
+    await navigator.clipboard.writeText(text);
+    $('#copy-btn').textContent = '已复制';
+    setTimeout(() => { $('#copy-btn').innerHTML = '<svg><use href="#icon-copy"/></svg>复制记录'; }, 1600);
+  } catch (error) { showNotice('浏览器没有允许复制，可以直接选中对话文字复制。'); }
+});
+$('#consume-btn').addEventListener('click', async () => {
+  $('#consume-btn').disabled = true;
+  const result = $('#consume-result');
+  result.classList.remove('hidden');
+  try {
+    const response = await fetch('api/consume');
+    const data = await response.json();
+    if (!response.ok || data.error_code) throw new Error(data.error_reason || '查询失败');
+    const rows = (data.data || []).slice(0, 6);
+    result.innerHTML = rows.length
+      ? `<table><thead><tr><th>应用</th><th>积分</th><th>开始时间</th></tr></thead><tbody>${rows.map((row) => `<tr><td>${escapeHtml(row.app_name || '-')}</td><td>${escapeHtml(row.amount ?? '-')}</td><td>${escapeHtml(row.start_time || '-')}</td></tr>`).join('')}</tbody></table>`
+      : '暂无消耗记录。';
+  } catch (error) { result.textContent = error.message; }
+  finally { updateControls(); }
+});
+window.addEventListener('pagehide', () => { if (session) void session.destroy(); });
+
+async function main() {
+  applyTheme(document.documentElement.dataset.theme || 'light');
+  renderScenes();
+  await loadConfig();
+  if (state.config.configured) await connectScenario();
+}
 main();

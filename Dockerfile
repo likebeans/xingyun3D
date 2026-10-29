@@ -1,5 +1,5 @@
-# 星云具身驱动 Demo —— 零依赖，Node 20 即可运行
-FROM node:20-alpine
+# 星云数字人互动空间 —— 零 npm 依赖
+FROM node:24-bookworm-slim
 
 WORKDIR /app
 
@@ -11,5 +11,6 @@ COPY public ./public
 # 运行端口（可用环境变量覆盖）
 ENV PORT=3000
 EXPOSE 3000
+USER node
 
 CMD ["node", "server.js"]

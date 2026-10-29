@@ -39,14 +39,16 @@ loadEnvFile(path.join(__dirname, '.env'));
 
 const PORT = Number(process.env.PORT) || 3000;
 const GATEWAY_HOST = 'https://nebula-agent.xingyun3d.com';
+const configuredGateway = process.env.XMOV_GATEWAY_SERVER;
+const gatewayServer = !configuredGateway || configuredGateway === `${GATEWAY_HOST}/user/v1/ttsa/session`
+  ? `${GATEWAY_HOST}/user/v1/ttsa_v2/session`
+  : configuredGateway;
 
 const config = {
   configured: Boolean(process.env.XMOV_APP_ID && process.env.XMOV_APP_SECRET),
   appId: process.env.XMOV_APP_ID || '',
   appSecret: process.env.XMOV_APP_SECRET || '',
-  gatewayServer:
-    process.env.XMOV_GATEWAY_SERVER ||
-    `${GATEWAY_HOST}/user/v1/ttsa/session`,
+  gatewayServer,
   authorization: process.env.XMOV_AUTHORIZATION || '',
 };
 
@@ -157,7 +159,7 @@ server.listen(PORT, () => {
   console.log('  └──────────────────────────────────────────────┘');
   console.log('');
   if (config.configured) {
-    console.log(`  ✓ 已读取应用凭证（appId: ${config.appId.slice(0, 8)}…）`);
+    console.log('  ✓ 已读取应用凭证');
   } else {
     console.log('  ⚠ 尚未配置凭证：请编辑 .env 填入 XMOV_APP_ID / XMOV_APP_SECRET 后重启');
   }
