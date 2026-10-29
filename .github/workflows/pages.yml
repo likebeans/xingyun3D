@@ -29,7 +29,7 @@ jobs:
         with:
           node-version: 24
 
-      - uses: actions/configure-pages@v5
+      - uses: actions/configure-pages@v6
 
       - name: 组装静态站点
         env:
