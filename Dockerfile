@@ -1,5 +1,5 @@
 # 星云数字人互动空间 —— 零 npm 依赖
-FROM node:24-bookworm-slim
+FROM node:26-bookworm-slim
 
 WORKDIR /app
 
